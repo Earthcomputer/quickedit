@@ -1,3 +1,6 @@
+#![allow(non_snake_case)]
+#![allow(non_upper_case_globals)]
+
 use internment::ArcIntern;
 use lazy_static::lazy_static;
 use crate::ResourceLocation;

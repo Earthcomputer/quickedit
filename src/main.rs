@@ -1,4 +1,8 @@
 #![feature(int_log)]
+#![feature(int_roundings)]
+
+#![allow(dead_code)]
+#![allow(clippy::needless_return)]
 
 mod world;
 mod util;
@@ -95,11 +99,8 @@ where
             *control_flow = glium::glutin::event_loop::ControlFlow::Wait;
         }
 
-        match &event {
-            glium::glutin::event::Event::RedrawRequested(_) => {
-                callback(Request::Redraw, &display);
-            }
-            _ => {}
+        if let glium::glutin::event::Event::RedrawRequested(_) = &event {
+            callback(Request::Redraw, &display);
         }
     })
 }
@@ -142,17 +143,13 @@ fn main() {
                 should_update_ui,
                 should_exit,
             } => {
-                if let Some(event) = convert_event(&event, &display.gl_window().window()) {
+                if let Some(event) = convert_event(event, display.gl_window().window()) {
                     ui.handle_event(event);
                     *should_update_ui = true;
                 }
 
-                match event {
-                    event::Event::WindowEvent { event, .. } => match event {
-                        event::WindowEvent::CloseRequested => *should_exit = true,
-                        _ => {}
-                    },
-                    _ => {}
+                if let event::Event::WindowEvent { event: event::WindowEvent::CloseRequested, .. } = event {
+                    *should_exit = true
                 }
             },
             Request::SetUi { needs_redraw } => {
@@ -168,7 +165,7 @@ fn main() {
                     let path = FileDialog::new().show_open_single_dir();
                     if let Ok(Some(path)) = path {
                         worlds.push(world::World::new(path));
-                        worlds.last().unwrap().get_dimension(CommonFNames.OVERWORLD.clone()).unwrap().load_chunk(&worlds.last().unwrap(), world::ChunkPos::new(0, 0));
+                        worlds.last().unwrap().get_dimension(CommonFNames.OVERWORLD.clone()).unwrap().load_chunk(worlds.last().unwrap(), world::ChunkPos::new(0, 0));
                     }
                 }
 

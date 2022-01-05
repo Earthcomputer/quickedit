@@ -1,6 +1,6 @@
 use std::fmt;
 use std::fmt::Formatter;
-use std::hash::{BuildHasherDefault, Hash};
+use std::hash::Hash;
 use std::str::FromStr;
 use dashmap::DashMap;
 
@@ -38,8 +38,8 @@ impl FromStr for ResourceLocation {
     type Err = String;
 
     fn from_str(s: &str) -> Result<Self, Self::Err> {
-        if s.contains(":") {
-            let mut parts = s.split(":");
+        if s.contains(':') {
+            let mut parts = s.split(':');
             let namespace = parts.next().unwrap().to_string();
             let name = parts.next().unwrap().to_string();
             Ok(ResourceLocation { namespace, name })

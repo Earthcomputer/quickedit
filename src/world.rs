@@ -1,20 +1,18 @@
 use std::collections::HashMap;
 use std::{io, mem};
-use std::borrow::{Borrow, BorrowMut};
 use std::collections::hash_map::DefaultHasher;
 use std::hash::{Hash, Hasher};
-use std::io::{BufRead, Cursor};
+use std::io::Cursor;
 use std::mem::MaybeUninit;
 use std::path::PathBuf;
 use std::sync::Arc;
 use byteorder::{BigEndian, ReadBytesExt};
 use dashmap::mapref::entry::Entry;
 use internment::ArcIntern;
-use lazy_static::lazy_static;
 use num_integer::Integer;
 use positioned_io_preview::{RandomAccessFile, ReadAt};
 use crate::fname::{CommonFNames, FName};
-use crate::util::{FastDashMap, make_fast_dash_map, ResourceLocation};
+use crate::util::{FastDashMap, make_fast_dash_map};
 
 #[derive(Debug, Clone, Copy, PartialEq, Eq, Hash)]
 pub struct ChunkPos {
@@ -41,6 +39,7 @@ pub struct BlockState {
     properties: HashMap<FName, FName>,
 }
 
+#[allow(clippy::derive_hash_xor_eq)]
 impl Hash for BlockState {
     fn hash<H: std::hash::Hasher>(&self, state: &mut H) {
         self.block.hash(state);
@@ -85,7 +84,7 @@ macro_rules! define_paletted_data {
                     entries_per_long,
                     palette: Vec::with_capacity($default_palette_size),
                     inv_palette: HashMap::new(),
-                    data: Vec::with_capacity(((1_usize << $h_bits) * (1_usize << $h_bits) * (1_usize << $v_bits)).div_ceil(&(entries_per_long as usize))),
+                    data: Vec::with_capacity(((1_usize << $h_bits) * (1_usize << $h_bits) * (1_usize << $v_bits)).div_ceil(entries_per_long as usize)),
                 }
             }
 
@@ -135,7 +134,7 @@ macro_rules! define_paletted_data {
                 let old_entries_per_long = self.entries_per_long;
                 self.palette.reserve(self.palette.len());
                 self.bits_per_block += 1;
-                self.entries_per_long = 64_u8.div_floor(&self.bits_per_block);
+                self.entries_per_long = 64_u8.div_floor(self.bits_per_block);
                 let old_data = mem::replace(&mut self.data, Vec::with_capacity(((1 << $h_bits) * (1 << $h_bits) * (1 << $v_bits)).div_ceil(&(self.entries_per_long as usize))));
                 let mut block = 0;
                 for index in 0..old_data_size - 1 {
@@ -149,7 +148,7 @@ macro_rules! define_paletted_data {
                         }
                     }
                 }
-                if ((1 << $h_bits) * (1 << $h_bits) * (1 << $v_bits)) % self.entries_per_long != 0 {
+                if ((1_u64 << $h_bits) * (1_u64 << $h_bits) * (1_u64 << $v_bits)) % self.entries_per_long as u64 != 0 {
                     self.data.push(block);
                 }
             }
@@ -214,13 +213,14 @@ impl Dimension {
     }
 
     pub fn load_chunk(&self, world: &World, pos: ChunkPos) {
-        let chunk = self.read_chunk(world, pos).unwrap();
+        let _chunk = self.read_chunk(world, pos).unwrap();
     }
 
     fn read_chunk(&self, world: &World, pos: ChunkPos) -> io::Result<Chunk> {
         let save_dir = self.get_save_dir(world);
         let region_path = save_dir.join("region").join(format!("r.{}.{}.mca", pos.x >> 5, pos.z >> 5));
         let raf = RandomAccessFile::open(region_path)?;
+        #[allow(clippy::uninit_assumed_init)]
         let mut sector_data: [u8; 4] = unsafe { MaybeUninit::uninit().assume_init() };
         raf.read_exact_at((((pos.x & 31) | ((pos.z & 31) << 5)) << 2) as u64, &mut sector_data)?;
         let offset = Cursor::new(sector_data).read_u24::<BigEndian>()? as u64 * 4096;
@@ -229,6 +229,7 @@ impl Dimension {
             return Err(io::Error::new(io::ErrorKind::InvalidData, "Chunk header is truncated"));
         }
         let mut buffer = Vec::with_capacity(size);
+        #[allow(clippy::uninit_vec)]
         unsafe { buffer.set_len(size); }
         raf.read_exact_at(offset, &mut buffer)?;
         let mut cursor = Cursor::new(&buffer);
@@ -372,7 +373,7 @@ impl World {
 
     pub fn get_dimension(&self, id: FName) -> Option<Arc<Dimension>> {
         match self.dimensions.entry(id) {
-            Entry::Occupied(mut entry) => Some(entry.get().clone()),
+            Entry::Occupied(entry) => Some(entry.get().clone()),
             Entry::Vacant(_) => None
         }
     }
