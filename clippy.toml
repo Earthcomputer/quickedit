@@ -1,0 +1,6 @@
+disallowed-methods = [
+    "dashmap::DashMap::new"
+]
+disallowed-types = [
+    "std::collections::HashMap"
+]

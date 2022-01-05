@@ -1,0 +1,23 @@
+[package]
+name = "mcedit_rs"
+version = "1.0.0"
+authors = ["Earthcomputer <burtonjae@hotmail.co.uk>"]
+edition = "2018"
+
+# See more keys and their definitions at https://doc.rust-lang.org/cargo/reference/manifest.html
+
+[dependencies]
+glium = "0.28.0"
+winit = "0.23.0"
+conrod_core = "0.76.0"
+conrod_glium = "0.76.0"
+conrod_winit = "0.76.0"
+native-dialog = "0.6.1"
+num-integer = "0.1.44"
+internment = { version = "0.5.5", features = ["arc"] }
+dashmap = "5.0.0"
+hematite-nbt = { git = "https://github.com/PistonDevelopers/hematite_nbt", rev = "ce60b81" }
+positioned-io-preview = "0.3.3"
+byteorder = "1.4.3"
+lazy_static = "1.4.0"
+ahash = "0.7.6"
