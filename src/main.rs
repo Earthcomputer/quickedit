@@ -22,7 +22,9 @@ use glium::{
 };
 use conrod_core::{widget, widget_ids, Positionable, Widget, Sizeable, Labelable, text};
 use glium::{implement_vertex, Surface};
+use image::GenericImageView;
 use native_dialog::FileDialog;
+use winit::window::Icon;
 use crate::fname::CommonFNames;
 use crate::util::ResourceLocation;
 
@@ -35,10 +37,18 @@ implement_vertex!(Vertex, position);
 const WIDTH: f64 = 1920.0;
 const HEIGHT: f64 = 1080.0;
 
-const MAIN_VERT_SHADER: &str = include_str!("main.vsh");
-const MAIN_FRAG_SHADER: &str = include_str!("main.fsh");
+const MAIN_VERT_SHADER: &str = include_str!("../res/main.vsh");
+const MAIN_FRAG_SHADER: &str = include_str!("../res/main.fsh");
 
-const FONT_DATA: &[u8] = include_bytes!("MinecraftRegular-Bmg3.ttf");
+const FONT_DATA: &[u8] = include_bytes!("../res/MinecraftRegular-Bmg3.ttf");
+const ICON_DATA: &[u8] = include_bytes!("../res/icon_32x32.png");
+
+thread_local! {
+    static ICON: Icon = {
+        let image = image::load_from_memory_with_format(ICON_DATA, image::ImageFormat::Png).unwrap();
+        Icon::from_rgba(image.as_rgba8().unwrap().as_raw().clone(), image.width(), image.height()).unwrap()
+    };
+}
 
 enum Request<'a, 'b: 'a> {
     Event {
@@ -111,6 +121,7 @@ fn main() {
     let event_loop = event_loop::EventLoop::new();
     let wb = window::WindowBuilder::new()
         .with_title("MCEdit RS")
+        .with_window_icon(Some(ICON.with(|i| i.clone())))
         .with_inner_size(dpi::LogicalSize::new(WIDTH, HEIGHT));
     let cb = ContextBuilder::new();
     let display = Display::new(wb, cb, &event_loop).unwrap();

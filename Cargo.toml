@@ -1,8 +1,10 @@
 [package]
 name = "mcedit_rs"
+description = "Minecraft world editor written in Rust"
 version = "1.0.0"
 authors = ["Earthcomputer <burtonjae@hotmail.co.uk>"]
 edition = "2018"
+build = "build.rs"
 
 # See more keys and their definitions at https://doc.rust-lang.org/cargo/reference/manifest.html
 
@@ -21,3 +23,18 @@ positioned-io-preview = "0.3.3"
 byteorder = "1.4.3"
 lazy_static = "1.4.0"
 ahash = "0.7.6"
+image = "0.23.14"
+
+[build-dependencies]
+winres = "0.1.12"
+
+[package.metadata.bundle]
+identifier = "net.earthcomputer.mcedit_rs"
+icon = ["res/icon_16x16.png",
+    "res/icon_32x32.png",
+    "res/icon_128x128.png",
+    "res/icon_256x256.png",
+    "res/icon_16x16@2x.png",
+    "res/icon_32x32@2x.png",
+    "res/icon_128x128@2x.png"
+]
