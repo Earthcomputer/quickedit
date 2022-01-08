@@ -1,5 +1,9 @@
 #![feature(int_log)]
 #![feature(int_roundings)]
+#![feature(option_result_contains)]
+#![feature(map_try_insert)]
+#![feature(can_vector)]
+#![feature(read_buf)]
 
 #![allow(dead_code)]
 #![allow(clippy::needless_return)]
@@ -7,6 +11,10 @@
 mod world;
 mod util;
 mod fname;
+mod minecraft;
+mod ui;
+mod world_renderer;
+mod resource_loader;
 
 extern crate conrod_core;
 extern crate conrod_glium;
@@ -14,16 +22,15 @@ extern crate conrod_winit;
 extern crate glium;
 extern crate native_dialog;
 
+use conrod_core::text;
 use glium::{
     glutin::{dpi, event, event_loop, window, ContextBuilder},
     Display,
     index,
     uniforms
 };
-use conrod_core::{widget, widget_ids, Positionable, Widget, Sizeable, Labelable, text};
 use glium::{implement_vertex, Surface};
 use image::GenericImageView;
-use native_dialog::FileDialog;
 use winit::window::Icon;
 use crate::fname::CommonFNames;
 use crate::util::ResourceLocation;
@@ -136,16 +143,13 @@ fn main() {
 
     let program = glium::Program::from_source(&display, MAIN_VERT_SHADER, MAIN_FRAG_SHADER, None).unwrap();
 
-    let mut ui = conrod_core::UiBuilder::new([WIDTH, HEIGHT]).build();
+    let mut my_ui = conrod_core::UiBuilder::new([WIDTH, HEIGHT]).build();
     let image_map = conrod_core::image::Map::<glium::texture::Texture2d>::new();
     let mut renderer = conrod_glium::Renderer::new(&display).unwrap();
 
-    ui.fonts.insert(text::Font::from_bytes(FONT_DATA).unwrap());
+    my_ui.fonts.insert(text::Font::from_bytes(FONT_DATA).unwrap());
 
-    widget_ids!(struct Ids { open_button });
-    let ids = Ids::new(ui.widget_id_generator());
-
-    let mut worlds = Vec::new();
+    let ids = ui::init_ui(&mut my_ui);
 
     run_loop(display, event_loop, move |request, display| {
         match request {
@@ -155,7 +159,7 @@ fn main() {
                 should_exit,
             } => {
                 if let Some(event) = convert_event(event, display.gl_window().window()) {
-                    ui.handle_event(event);
+                    my_ui.handle_event(event);
                     *should_update_ui = true;
                 }
 
@@ -164,26 +168,12 @@ fn main() {
                 }
             },
             Request::SetUi { needs_redraw } => {
-                let ui = &mut ui.set_widgets();
-
-                if widget::Button::new()
-                    .label("Open")
-                    .top_left_of(ui.window)
-                    .w_h(200.0, 50.0)
-                    .set(ids.open_button, ui)
-                    .was_clicked()
-                {
-                    let path = FileDialog::new().show_open_single_dir();
-                    if let Ok(Some(path)) = path {
-                        worlds.push(world::World::new(path));
-                        worlds.last().unwrap().get_dimension(CommonFNames.OVERWORLD.clone()).unwrap().load_chunk(worlds.last().unwrap(), world::ChunkPos::new(0, 0));
-                    }
-                }
-
-                *needs_redraw = ui.has_changed();
+                let my_ui = &mut my_ui.set_widgets();
+                ui::set_ui(&ids, my_ui);
+                *needs_redraw = my_ui.has_changed();
             },
             Request::Redraw => {
-                let primitives = ui.draw();
+                let primitives = my_ui.draw();
                 renderer.fill(display, primitives, &image_map);
                 let mut target = display.draw();
                 target.clear_color(0.0, 0.0, 0.0, 1.0);

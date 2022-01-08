@@ -1,18 +1,26 @@
 use std::collections::HashMap;
-use std::{io, mem};
+use std::{fs, io, mem};
 use std::collections::hash_map::DefaultHasher;
 use std::hash::{Hash, Hasher};
 use std::io::Cursor;
 use std::mem::MaybeUninit;
 use std::path::PathBuf;
-use std::sync::Arc;
+use std::sync::{Arc, RwLock};
+use serde::Deserialize;
 use byteorder::{BigEndian, ReadBytesExt};
 use dashmap::mapref::entry::Entry;
 use internment::ArcIntern;
+use lazy_static::lazy_static;
 use num_integer::Integer;
 use positioned_io_preview::{RandomAccessFile, ReadAt};
 use crate::fname::{CommonFNames, FName};
+use crate::minecraft;
 use crate::util::{FastDashMap, make_fast_dash_map};
+use crate::world_renderer::WorldRenderer;
+
+lazy_static! {
+    pub static ref WORLDS: RwLock<Vec<Arc<World>>> = RwLock::new(Vec::new());
+}
 
 #[derive(Debug, Clone, Copy, PartialEq, Eq, Hash)]
 pub struct ChunkPos {
@@ -352,14 +360,21 @@ impl Dimension {
 }
 
 pub struct World {
+    level_dat: LevelDat,
     path: PathBuf,
+    renderer: WorldRenderer,
     dimensions: FastDashMap<FName, Arc<Dimension>>,
 }
 
 impl World {
-    pub fn new(path: PathBuf) -> World {
+    pub fn new(path: PathBuf) -> io::Result<World> {
+        let level_dat = path.join("level.dat");
+        let level_dat: LevelDat = nbt::from_gzip_reader(fs::File::open(level_dat)?)?;
+        let renderer = WorldRenderer::new(level_dat.data.version.as_ref().map(|v| &v.name).unwrap_or(&minecraft::ABSENT_MINECRAFT_VERSION.to_string()));
         let world = World {
+            level_dat,
             path,
+            renderer,
             dimensions: make_fast_dash_map()
         };
         let mut overworld = Dimension::new(CommonFNames.OVERWORLD.clone());
@@ -368,7 +383,7 @@ impl World {
         world.dimensions.insert(CommonFNames.OVERWORLD.clone(), Arc::new(overworld));
         world.dimensions.insert(CommonFNames.THE_NETHER.clone(), Arc::new(Dimension::new(CommonFNames.THE_NETHER.clone())));
         world.dimensions.insert(CommonFNames.THE_END.clone(), Arc::new(Dimension::new(CommonFNames.THE_END.clone())));
-        world
+        Ok(world)
     }
 
     pub fn get_dimension(&self, id: FName) -> Option<Arc<Dimension>> {
@@ -377,4 +392,24 @@ impl World {
             Entry::Vacant(_) => None
         }
     }
+}
+
+#[derive(Deserialize)]
+struct LevelDat {
+    #[serde(rename = "Data")]
+    data: LevelDatData,
+}
+
+#[derive(Deserialize)]
+struct LevelDatData {
+    #[serde(rename = "Version")]
+    version: Option<LevelDatVersionInfo>,
+}
+
+#[derive(Deserialize)]
+struct LevelDatVersionInfo {
+    #[serde(rename = "Id")]
+    id: u32,
+    #[serde(rename = "Name")]
+    name: String,
 }
