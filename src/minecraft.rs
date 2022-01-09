@@ -7,7 +7,6 @@ use lazy_static::lazy_static;
 use sha1::{Sha1, Digest};
 use crate::util::{FastDashMap, make_fast_dash_map};
 use serde::Deserialize;
-use async_recursion::async_recursion;
 use sha1::digest::generic_array::functional::FunctionalSequence;
 
 // ===== Getting the Minecraft jar ===== //
@@ -79,11 +78,10 @@ lazy_static! {
 const VERSION_MANIFEST_FILE: &str = "version_manifest.json";
 const VERSION_MANIFEST_URL: &str = "https://launchermeta.mojang.com/mc/game/version_manifest.json";
 
-#[async_recursion(?Send)]
-async fn download_if_changed<'a, T, U: 'a>(filename: &str, url: &U, force: bool) -> Result<T, io::Error>
+fn download_if_changed<'a, T, U: 'a + ?Sized>(filename: &str, url: &U, force: bool) -> Result<T, io::Error>
 where
     T: serde::de::DeserializeOwned,
-    U: reqwest::IntoUrl + Clone,
+    U: AsRef<str>,
 {
     if HAS_DOWNLOADED.contains_key(filename) && !force {
         return Ok(serde_json::from_reader(fs::File::open(filename)?)?);
@@ -91,20 +89,20 @@ where
 
     let minecraft_cache = get_minecraft_cache();
     let path = minecraft_cache.join(filename);
-    let mut request = reqwest::Client::new().get(url.clone());
+    let mut request = attohttpc::get(url);
     let etag_file = path.with_extension("etag");
     if !force {
         if let Ok(etag) = fs::read_to_string(&etag_file) {
-            request = request.header(reqwest::header::IF_NONE_MATCH, etag);
+            request = request.header(attohttpc::header::IF_NONE_MATCH, etag);
         }
     }
-    let response = request.send().await.map_err(|e| io::Error::new(io::ErrorKind::Other, e))?;
+    let response = request.send().map_err(|e| io::Error::new(io::ErrorKind::Other, e))?;
     let status = response.status();
-    if status == reqwest::StatusCode::OK {
+    if status == attohttpc::StatusCode::OK {
         let headers = response.headers().clone();
-        let text = response.text().await.map_err(|e| io::Error::new(io::ErrorKind::Other, e))?;
+        let text = response.text().map_err(|e| io::Error::new(io::ErrorKind::Other, e))?;
         fs::write(&path, text.clone())?;
-        if let Some(etag) = headers.get(reqwest::header::ETAG).and_then(|h| h.to_str().ok()) {
+        if let Some(etag) = headers.get(attohttpc::header::ETAG).and_then(|h| h.to_str().ok()) {
             fs::write(&etag_file, etag)?;
         }
         serde_json::from_str(&text).map_err(|e| io::Error::new(io::ErrorKind::Other, e))
@@ -117,8 +115,8 @@ where
                 Ok(result)
             }
             Err(e) => {
-                if !force && status == reqwest::StatusCode::NOT_MODIFIED {
-                    download_if_changed(filename, url, true).await
+                if !force && status == attohttpc::StatusCode::NOT_MODIFIED {
+                    download_if_changed(filename, url, true)
                 } else {
                     Err(e)
                 }
@@ -127,12 +125,14 @@ where
     }
 }
 
-pub async fn download_jar(version: &str) -> Result<PathBuf, io::Error> {
+pub fn download_jar(version: &str) -> Result<PathBuf, io::Error> {
+    fs::create_dir_all(get_minecraft_cache())?;
+
     let version_manifest: VersionManifest = download_if_changed(
         VERSION_MANIFEST_FILE,
-        &VERSION_MANIFEST_URL.to_string(),
+        VERSION_MANIFEST_URL,
         false,
-    ).await?;
+    )?;
 
     let version_json_url = version_manifest.versions.iter()
         .find(|version_data| version_data.id == version)
@@ -142,7 +142,7 @@ pub async fn download_jar(version: &str) -> Result<PathBuf, io::Error> {
         format!("{}.json", version).as_str(),
         &version_json_url,
         false,
-    ).await?;
+    )?;
 
     let jar_path = get_minecraft_cache().join(format!("{}.jar", version));
     let actual_sha1 = match fs::File::open(jar_path.clone()) {
@@ -155,13 +155,13 @@ pub async fn download_jar(version: &str) -> Result<PathBuf, io::Error> {
     };
 
     if actual_sha1.contains(&version_json.downloads.client.sha1) {
-        return Ok(jar_path.clone());
+        return Ok(jar_path);
     }
 
     let jar_url = version_json.downloads.client.url;
-    let response = reqwest::get(jar_url).await.map_err(|e| io::Error::new(io::ErrorKind::Other, e))?;
-    io::copy(&mut Cursor::new(response.bytes().await.map_err(|e| io::Error::new(io::ErrorKind::Other, e))?), &mut fs::File::create(&jar_path)?)?;
-    Ok(jar_path.clone())
+    let response = attohttpc::get(jar_url).send().map_err(|e| io::Error::new(io::ErrorKind::Other, e))?;
+    io::copy(&mut Cursor::new(response.bytes().map_err(|e| io::Error::new(io::ErrorKind::Other, e))?), &mut fs::File::create(&jar_path)?)?;
+    Ok(jar_path)
 }
 
 fn get_minecraft_cache() -> PathBuf {
@@ -173,7 +173,7 @@ pub fn get_existing_jar(version: &str) -> Option<PathBuf> {
 }
 
 pub trait DownloadInteractionHandler {
-    fn show_download_prompt(&mut self, mc_version: &str) -> Box<dyn std::future::Future<Output=bool> + Unpin>;
+    fn show_download_prompt(&mut self, mc_version: &str) -> bool;
     fn on_start_download(&mut self);
     fn on_finish_download(&mut self);
 }
@@ -361,7 +361,7 @@ lazy_static! {
 }
 
 
-async fn get_world_version(mc_version: &str) -> io::Result<u32> {
+fn get_world_version(mc_version: &str) -> io::Result<u32> {
     if let Some(&version) = HARDCODED_WORLD_VERSIONS.0.get(mc_version) {
         return Ok(version);
     }
@@ -378,7 +378,7 @@ async fn get_world_version(mc_version: &str) -> io::Result<u32> {
         format!("{}_burger.json", mc_version).as_str(),
         &format!("https://pokechu22.github.io/Burger/{}.json", mc_version),
         false,
-    ).await?;
+    )?;
 
     versions.0.insert(mc_version.to_string(), burger_json.version.data);
     versions.1.insert(burger_json.version.data, mc_version.to_string());
@@ -404,12 +404,12 @@ enum BinarySearchResult {
     Absent(i32, i32),
 }
 
-async fn binary_search_versions(versions: &[&Version], world_version: u32, mut left: i32, mut right: i32) -> BinarySearchResult {
+fn binary_search_versions(versions: &[&Version], world_version: u32, mut left: i32, mut right: i32) -> BinarySearchResult {
     while left < right {
         let mut mid = (left + right) / 2;
         let mut mid_version = versions[mid as usize];
         let mut mid_version_id = mid_version.id.clone();
-        let mut mid_version_world_version = get_world_version(&mid_version_id).await.ok();
+        let mut mid_version_world_version = get_world_version(&mid_version_id).ok();
         let mut going_left = false;
         while mid_version_world_version.is_none() {
             if !going_left {
@@ -427,7 +427,7 @@ async fn binary_search_versions(versions: &[&Version], world_version: u32, mut l
             }
             mid_version = versions[mid as usize];
             mid_version_id = mid_version.id.clone();
-            mid_version_world_version = get_world_version(&mid_version_id).await.ok();
+            mid_version_world_version = get_world_version(&mid_version_id).ok();
         }
         if mid_version_world_version.unwrap() == world_version {
             return BinarySearchResult::Present(mid_version_id);
@@ -439,17 +439,17 @@ async fn binary_search_versions(versions: &[&Version], world_version: u32, mut l
         }
     }
 
-    while left >= 0 && (left >= versions.len() as i32 || (get_world_version(&versions[left as usize].id).await.ok().map(|it| it > world_version)) != Some(false)) {
+    while left >= 0 && (left >= versions.len() as i32 || (get_world_version(&versions[left as usize].id).ok().map(|it| it > world_version)) != Some(false)) {
         left -= 1;
     }
-    while right < versions.len() as i32 && (right < 0 || (get_world_version(&versions[right as usize].id).await.ok().map(|it| it < world_version)) != Some(false)) {
+    while right < versions.len() as i32 && (right < 0 || (get_world_version(&versions[right as usize].id).ok().map(|it| it < world_version)) != Some(false)) {
         right += 1;
     }
 
     BinarySearchResult::Absent(left, right)
 }
 
-pub async fn get_minecraft_version(world_version: u32) -> Option<String> {
+pub fn get_minecraft_version(world_version: u32) -> Option<String> {
     if world_version < 922 {
         return HARDCODED_WORLD_VERSIONS.1.get(&world_version).cloned();
     }
@@ -459,16 +459,16 @@ pub async fn get_minecraft_version(world_version: u32) -> Option<String> {
 
     let version_manifest: VersionManifest = download_if_changed(
         VERSION_MANIFEST_FILE,
-        &VERSION_MANIFEST_URL.to_string(),
+        VERSION_MANIFEST_URL,
         false,
-    ).await.ok()?;
+    ).ok()?;
     // try the most likely options first
-    if get_world_version(&version_manifest.latest.release).await.ok().contains(&world_version) {
-        return Some(version_manifest.latest.release.clone());
+    if get_world_version(&version_manifest.latest.release).ok().contains(&world_version) {
+        return Some(version_manifest.latest.release);
     }
-    let snapshot_world_version = get_world_version(&version_manifest.latest.snapshot).await.ok();
+    let snapshot_world_version = get_world_version(&version_manifest.latest.snapshot).ok();
     if snapshot_world_version.is_some() && snapshot_world_version.unwrap() >= world_version {
-        return Some(version_manifest.latest.snapshot.clone());
+        return Some(version_manifest.latest.snapshot);
     }
 
     let release_date_1_11_1 = chrono::Utc.ymd(2016, 12, 20).and_hms(23, 59, 59);
@@ -476,14 +476,14 @@ pub async fn get_minecraft_version(world_version: u32) -> Option<String> {
     let mut versions: Vec<_> = version_manifest.versions.iter().filter(|v| v.release_time > release_date_1_11_1).collect();
     versions.sort_by_key(|v| v.release_time);
     let release_versions: Vec<_> = versions.iter().filter(|v| v.release_type == "release").copied().collect();
-    match binary_search_versions(&release_versions, world_version, 0, release_versions.len() as i32).await {
+    match binary_search_versions(&release_versions, world_version, 0, release_versions.len() as i32) {
         BinarySearchResult::Present(version) => Some(version),
         BinarySearchResult::Absent(mut left, mut right) => {
             left = left.max(0);
             right = right.min(versions.len() as i32);
             left = versions.iter().position(|v| v.id == release_versions[left as usize].id).unwrap() as i32;
             right = versions.iter().position(|v| v.id == release_versions[right as usize].id).unwrap() as i32;
-            match binary_search_versions(&versions, world_version, left, right).await {
+            match binary_search_versions(&versions, world_version, left, right) {
                 BinarySearchResult::Present(version) => Some(version),
                 BinarySearchResult::Absent(left, right) => {
                     Some(versions[left.max(right) as usize].id.clone())

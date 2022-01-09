@@ -15,6 +15,7 @@ use num_integer::Integer;
 use positioned_io_preview::{RandomAccessFile, ReadAt};
 use crate::fname::{CommonFNames, FName};
 use crate::minecraft;
+use crate::resources;
 use crate::util::{FastDashMap, make_fast_dash_map};
 use crate::world_renderer::WorldRenderer;
 
@@ -35,10 +36,44 @@ impl ChunkPos {
 }
 
 #[derive(Debug, Clone, Copy, PartialEq, Eq, Hash)]
-struct BlockPos {
-    x: i32,
-    y: i32,
-    z: i32,
+pub struct Pos<T> {
+    x: T,
+    y: T,
+    z: T,
+}
+
+impl<T> Pos<T> {
+    pub fn new(x: T, y: T, z: T) -> Self {
+        Pos { x, y, z }
+    }
+}
+
+pub type BlockPos = Pos<i32>;
+
+#[derive(Debug, Clone, Copy, PartialEq, Eq, Hash, Deserialize)]
+pub enum Axis {
+    #[serde(rename = "x")]
+    X,
+    #[serde(rename = "y")]
+    Y,
+    #[serde(rename = "z")]
+    Z,
+}
+
+#[derive(Debug, Clone, Copy, PartialEq, Eq, Hash, Deserialize)]
+pub enum Direction {
+    #[serde(rename = "north")]
+    North,
+    #[serde(rename = "south")]
+    South,
+    #[serde(rename = "east")]
+    East,
+    #[serde(rename = "west")]
+    West,
+    #[serde(rename = "up")]
+    Up,
+    #[serde(rename = "down")]
+    Down,
 }
 
 #[derive(Debug, Clone, PartialEq, Eq)]
@@ -362,18 +397,25 @@ impl Dimension {
 pub struct World {
     level_dat: LevelDat,
     path: PathBuf,
+    resources: resources::Resources,
     renderer: WorldRenderer,
     dimensions: FastDashMap<FName, Arc<Dimension>>,
 }
 
 impl World {
-    pub fn new(path: PathBuf) -> io::Result<World> {
+    pub fn new(path: PathBuf, interaction_handler: &mut dyn minecraft::DownloadInteractionHandler) -> io::Result<World> {
         let level_dat = path.join("level.dat");
         let level_dat: LevelDat = nbt::from_gzip_reader(fs::File::open(level_dat)?)?;
-        let renderer = WorldRenderer::new(level_dat.data.version.as_ref().map(|v| &v.name).unwrap_or(&minecraft::ABSENT_MINECRAFT_VERSION.to_string()));
+        let mc_version = level_dat.data.version.as_ref().map(|v| &v.name).unwrap_or(&minecraft::ABSENT_MINECRAFT_VERSION.to_string()).clone();
+        let resources = match resources::Resources::load(&mc_version, &Vec::new(), interaction_handler) {
+            Some(r) => r,
+            None => return Err(io::Error::new(io::ErrorKind::Other, "Failed to load resources")),
+        };
+        let renderer = WorldRenderer::new(&mc_version);
         let world = World {
             level_dat,
             path,
+            resources,
             renderer,
             dimensions: make_fast_dash_map()
         };

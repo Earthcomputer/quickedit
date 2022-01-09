@@ -1,7 +1,6 @@
 #![feature(int_log)]
 #![feature(int_roundings)]
 #![feature(option_result_contains)]
-#![feature(map_try_insert)]
 #![feature(can_vector)]
 #![feature(read_buf)]
 
@@ -14,7 +13,7 @@ mod fname;
 mod minecraft;
 mod ui;
 mod world_renderer;
-mod resource_loader;
+mod resources;
 
 extern crate conrod_core;
 extern crate conrod_glium;
