@@ -4,6 +4,7 @@ use std::io::Read;
 use std::ops::Deref;
 use std::path::{Path, PathBuf};
 use ahash::{AHashMap, AHashSet};
+use image::GenericImageView;
 use path_slash::{PathBufExt, PathExt};
 use crate::{minecraft, ResourceLocation, util, world};
 use serde::{Deserialize, Deserializer};
@@ -296,18 +297,21 @@ impl Resources {
                 if resources.textures.contains_key(texture) {
                     continue;
                 }
-                let mut texture_reader = match Resources::get_resource(resource_packs, format!("assets/{}/textures/{}.png", texture.namespace, texture.name).as_str()) {
-                    Ok(Some(reader)) => reader,
-                    _ => {
-                        eprintln!("Texture not found: {}", texture);
+                let png_data = {
+                    let mut texture_reader = match Resources::get_resource(resource_packs, format!("assets/{}/textures/{}.png", texture.namespace, texture.name).as_str()) {
+                        Ok(Some(reader)) => reader,
+                        _ => {
+                            eprintln!("Texture not found: {}", texture);
+                            continue
+                        }
+                    };
+                    let mut png_data = Vec::new();
+                    if texture_reader.read_to_end(&mut png_data).is_err() {
+                        eprintln!("Error reading texture: {}", texture);
                         continue
                     }
+                    png_data
                 };
-                let mut png_data = Vec::new();
-                if texture_reader.read_to_end(&mut png_data).is_err() {
-                    eprintln!("Error reading texture: {}", texture);
-                    continue
-                }
                 let image = match image::load(io::Cursor::new(png_data), image::ImageFormat::Png) {
                     Ok(image) => image,
                     Err(err) => {
@@ -315,7 +319,41 @@ impl Resources {
                         continue
                     }
                 }.to_rgb8();
-                resources.textures.insert(texture.clone(), (image.as_raw().clone(), image.width(), image.height()));
+                let animation: Option<Animation> = match Resources::get_resource(resource_packs, format!("assets/{}/textures/{}.png.mcmeta", texture.namespace, texture.name).as_str()) {
+                    Ok(Some(mut reader)) => {
+                        match serde_json::from_reader(util::ReadDelegate::new(&mut *reader)) {
+                            Ok(animation) => Some(animation),
+                            Err(err) => {
+                                eprintln!("Error loading texture animation: {}", err);
+                                continue
+                            }
+                        }
+                    }
+                    Ok(None) => None,
+                    Err(err) => {
+                        eprintln!("Error loading texture animation: {}", err);
+                        continue
+                    }
+                };
+                let image = if let Some(animation) = animation {
+                    if animation.width > 0 {
+                        let height = image.width() * animation.height / animation.width;
+                        if height <= image.height() {
+                            (image.view(0, 0, image.width(), height).to_image().into_raw(), image.width(), height)
+                        } else {
+                            eprintln!("Invalid texture animation: {}", texture);
+                            continue
+                        }
+                    } else {
+                        eprintln!("Invalid texture animation: {}", texture);
+                        continue
+                    }
+                } else {
+                    let width = image.width();
+                    let height = image.height();
+                    (image.into_raw(), width, height)
+                };
+                resources.textures.insert(texture.clone(), image);
             }
         }
     }
@@ -392,12 +430,12 @@ pub struct ModelVariant {
     y: i32,
     #[serde(default)]
     uvlock: bool,
-    #[serde(default = "default_weight")]
+    #[serde(default = "default_one")]
     weight: i32,
 }
 
-const fn default_weight() -> i32 {
-    1
+fn default_one<T: num_integer::Integer>() -> T {
+    T::one()
 }
 
 #[derive(Deserialize)]
@@ -628,4 +666,12 @@ fn deserialize_cullface<'de, D>(deserializer: D) -> Result<Option<world::Directi
         }
     }
     deserializer.deserialize_any(MyVisitor{})
+}
+
+#[derive(Deserialize)]
+struct Animation {
+    #[serde(default = "default_one")]
+    width: u32,
+    #[serde(default = "default_one")]
+    height: u32,
 }
