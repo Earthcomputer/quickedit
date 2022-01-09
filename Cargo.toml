@@ -36,6 +36,7 @@ delegate = "0.6.1"
 futures-lite = "1.12.0"
 async-executor = "1.4.1"
 attohttpc = "0.18.0"
+structopt = "0.3.25"
 
 [build-dependencies]
 winres = "0.1.12"

@@ -21,6 +21,8 @@ extern crate conrod_winit;
 extern crate glium;
 extern crate native_dialog;
 
+use std::path::PathBuf;
+use std::sync::Arc;
 use conrod_core::text;
 use glium::{
     glutin::{dpi, event, event_loop, window, ContextBuilder},
@@ -31,8 +33,16 @@ use glium::{
 use glium::{implement_vertex, Surface};
 use image::GenericImageView;
 use winit::window::Icon;
+use structopt::StructOpt;
 use crate::fname::CommonFNames;
 use crate::util::ResourceLocation;
+
+#[derive(StructOpt)]
+#[structopt(name = "mcedit_rs", about = "A Minecraft world editor")]
+struct CmdLineArgs {
+    #[structopt(short = "w", long = "world")]
+    world: Option<PathBuf>,
+}
 
 #[derive(Copy, Clone)]
 struct Vertex {
@@ -124,6 +134,36 @@ where
 conrod_winit::v023_conversion_fns!();
 
 fn main() {
+    let args: CmdLineArgs = CmdLineArgs::from_args();
+
+    if let Some(world_folder) = args.world {
+        struct CmdLineInteractionHandler;
+        impl minecraft::DownloadInteractionHandler for CmdLineInteractionHandler {
+            fn show_download_prompt(&mut self, mc_version: &str) -> bool {
+                println!("Downloading Minecraft {}", mc_version);
+                true
+            }
+
+            fn on_start_download(&mut self) {
+                println!("Starting download...");
+            }
+
+            fn on_finish_download(&mut self) {
+                println!("Finished download");
+            }
+        }
+        let mut interaction_handler = CmdLineInteractionHandler{};
+        let world = match world::World::new(world_folder, &mut interaction_handler) {
+            Ok(world) => world,
+            Err(err) => {
+                println!("Failed to load world: {}", err);
+                return;
+            }
+        };
+        let mut worlds = world::WORLDS.write().unwrap();
+        worlds.push(Arc::new(world));
+    }
+
     let event_loop = event_loop::EventLoop::new();
     let wb = window::WindowBuilder::new()
         .with_title("MCEdit RS")

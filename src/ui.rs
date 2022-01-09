@@ -1,4 +1,3 @@
-use std::path::PathBuf;
 use std::sync::Arc;
 use conrod_core::{Labelable, Positionable, Sizeable, widget, Widget, widget_ids};
 use crate::{CommonFNames, minecraft, world};
@@ -23,9 +22,8 @@ pub fn set_ui(ids: &Ids, ui: &mut conrod_core::UiCell) {
 }
 
 fn open_clicked() {
-    //let path = native_dialog::FileDialog::new().show_open_single_dir();
-    let path = PathBuf::from("/home/joe/.local/share/multimc/instances/1.18.1/.minecraft/saves/New World/");
-    /*if let Ok(Some(path)) = path*/ {
+    let path = native_dialog::FileDialog::new().show_open_single_dir();
+    if let Ok(Some(path)) = path {
         let mut interaction_handler = UiInteractionHandler{};
         let executor = async_executor::LocalExecutor::new();
         let task = executor.spawn(async { world::World::new(path, &mut interaction_handler) });
