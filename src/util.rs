@@ -230,3 +230,10 @@ impl<T: serde::de::DeserializeOwned> std::ops::DerefMut for ListOrSingleT<T> {
         &mut self.value
     }
 }
+
+pub fn round_up_power_of_two<T: num_traits::PrimInt>(n: T) -> T {
+    if n.is_zero() {
+        return T::one();
+    }
+    T::one() << (T::zero().count_zeros() - (n - T::one()).leading_zeros()) as usize
+}

@@ -4,16 +4,47 @@ use std::io::Read;
 use std::ops::Deref;
 use std::path::{Path, PathBuf};
 use ahash::{AHashMap, AHashSet};
-use image::GenericImageView;
+use image::{GenericImage, GenericImageView};
+use lazy_static::lazy_static;
 use path_slash::{PathBufExt, PathExt};
-use crate::{minecraft, ResourceLocation, util, world};
+use rayon::prelude::*;
+use crate::{gl, minecraft, ResourceLocation, util, world};
 use serde::{Deserialize, Deserializer};
 use serde::de::{Error, IntoDeserializer};
+use crate::fname::FName;
+use crate::fname::CommonFNames;
 
+lazy_static! {
+    static ref MAX_SUPPORTED_TEXTURE_SIZE: u32 = {
+        let mut max_supported_texture_size = 0;
+        unsafe {
+            gl::GetIntegerv(gl::MAX_TEXTURE_SIZE, &mut max_supported_texture_size);
+        }
+        let mut actual_max = 32768.max(max_supported_texture_size);
+        while actual_max >= 1024 {
+            unsafe {
+                gl::TexImage2D(gl::PROXY_TEXTURE_2D, 0, gl::RGBA as i32, actual_max, actual_max, 0, gl::RGBA, gl::UNSIGNED_BYTE, std::ptr::null_mut())
+            };
+            let mut result = 0;
+            unsafe {
+                gl::GetTexLevelParameteriv(gl::PROXY_TEXTURE_2D, 0, gl::TEXTURE_WIDTH, &mut result)
+            };
+            if result != 0 {
+                return result as u32;
+            }
+            actual_max >>= 1;
+        }
+        max_supported_texture_size.max(1024) as u32
+    };
+}
+
+pub const MISSINGNO_DATA: &[u8] = include_bytes!("../res/missingno.png");
+
+#[derive(Default)]
 pub struct Resources {
     blockstates: AHashMap<ResourceLocation, BlockstateFile>,
     block_models: AHashMap<ResourceLocation, BlockModel>,
-    textures: AHashMap<ResourceLocation, (Vec<u8>, u32, u32)>,
+    pub block_atlas: TextureAtlas,
 }
 
 trait ResourcePack {
@@ -271,7 +302,7 @@ impl Resources {
             for texture_id in textures_copy {
                 flatten_textures(&texture_id, &mut model.textures, &mut visited_textures);
                 match &model.textures[&texture_id] {
-                    TextureVariable::Imm(texture) => new_textures.insert(texture_id.to_string(), texture.clone()),
+                    TextureVariable::Imm(texture) => new_textures.insert(texture_id.to_string(), FName::new(texture.clone())),
                     TextureVariable::Ref(_) => {
                         eprintln!("Error loading texture {}", texture_id);
                         continue;
@@ -292,9 +323,10 @@ impl Resources {
     }
 
     fn load_textures(_mc_version: &str, resource_packs: &mut [Box<dyn ResourcePack>], resources: &mut Resources) {
+        let mut textures = AHashMap::new();
         for model in resources.block_models.values() {
             for texture in model.textures.values() {
-                if resources.textures.contains_key(texture) {
+                if textures.contains_key(texture) {
                     continue;
                 }
                 let png_data = {
@@ -318,7 +350,7 @@ impl Resources {
                         eprintln!("Error loading texture: {}", err);
                         continue
                     }
-                }.to_rgb8();
+                }.to_rgba8();
                 let animation: Option<Animation> = match Resources::get_resource(resource_packs, format!("assets/{}/textures/{}.png.mcmeta", texture.namespace, texture.name).as_str()) {
                     Ok(Some(mut reader)) => {
                         match serde_json::from_reader(util::ReadDelegate::new(&mut *reader)) {
@@ -339,7 +371,7 @@ impl Resources {
                     if animation.width > 0 {
                         let height = image.width() * animation.height / animation.width;
                         if height <= image.height() {
-                            (image.view(0, 0, image.width(), height).to_image().into_raw(), image.width(), height)
+                            image.view(0, 0, image.width(), height).to_image()
                         } else {
                             eprintln!("Invalid texture animation: {}", texture);
                             continue
@@ -349,13 +381,15 @@ impl Resources {
                         continue
                     }
                 } else {
-                    let width = image.width();
-                    let height = image.height();
-                    (image.into_raw(), width, height)
+                    image
                 };
-                resources.textures.insert(texture.clone(), image);
+                textures.insert(texture.clone(), image);
             }
         }
+
+        textures.insert(CommonFNames.MISSINGNO.clone(), image::load_from_memory_with_format(MISSINGNO_DATA, image::ImageFormat::Png).unwrap().to_rgba8());
+
+        resources.block_atlas = stitch(&textures, &mut 4, *MAX_SUPPORTED_TEXTURE_SIZE, *MAX_SUPPORTED_TEXTURE_SIZE).unwrap();
     }
 
     fn get_resource<'a>(resource_packs: &'a mut [Box<dyn ResourcePack>], path: &str) -> io::Result<Option<Box<dyn io::Read + 'a>>> {
@@ -370,11 +404,7 @@ impl Resources {
     }
 
     pub fn load(mc_version: &str, resource_packs: &[&PathBuf], interaction_handler: &mut dyn minecraft::DownloadInteractionHandler) -> Option<Resources> {
-        let mut resources = Resources {
-            blockstates: AHashMap::new(),
-            block_models: AHashMap::new(),
-            textures: AHashMap::new(),
-        };
+        let mut resources = Resources::default();
         let mut resource_pack_list = Vec::new();
         for resource_pack in resource_packs.iter().rev() {
             let resource_pack = match Resources::get_resource_pack(resource_pack) {
@@ -434,7 +464,7 @@ pub struct ModelVariant {
     weight: i32,
 }
 
-fn default_one<T: num_integer::Integer>() -> T {
+fn default_one<T: num_traits::PrimInt>() -> T {
     T::one()
 }
 
@@ -492,7 +522,7 @@ impl<'de> Deserialize<'de> for MultipartWhen {
 
 pub struct BlockModel {
     ambient_occlusion: bool,
-    textures: AHashMap<String, util::ResourceLocation>,
+    textures: AHashMap<String, FName>,
     elements: Vec<ModelElement>,
 }
 
@@ -674,4 +704,183 @@ struct Animation {
     width: u32,
     #[serde(default = "default_one")]
     height: u32,
+}
+
+// ===== TEXTURE STITCHING ===== //
+
+#[derive(Default)]
+pub struct TextureAtlas {
+    pub width: u32,
+    pub height: u32,
+    pub data: Vec<u8>,
+    pub sprites: AHashMap<FName, Sprite>,
+}
+
+pub struct Sprite {
+    pub u1: u32,
+    pub v1: u32,
+    pub u2: u32,
+    pub v2: u32,
+}
+
+fn stitch<P: image::Pixel<Subpixel=u8> + 'static, I: image::GenericImageView<Pixel=P>>(
+    textures: &AHashMap<FName, I>,
+    mipmap_level: &mut u8,
+    max_width: u32,
+    max_height: u32
+) -> Option<TextureAtlas> {
+    let mut textures: Vec<_> = textures.iter().collect();
+    textures.sort_by_key(|&(_, texture)| (!texture.width(), !texture.height()));
+    for (_, texture) in &textures {
+        *mipmap_level = (*mipmap_level).min(texture.width().trailing_zeros().min(texture.height().trailing_zeros()) as u8);
+    }
+
+    struct Slot<'a, P: image::Pixel<Subpixel=u8>, I: image::GenericImageView<Pixel=P>> {
+        x: u32, y: u32, width: u32, height: u32, data: SlotData<'a, P, I>,
+    }
+    unsafe impl<P: image::Pixel<Subpixel=u8>, I: image::GenericImageView<Pixel=P>> Sync for Slot<'_, P, I> {}
+    enum SlotData<'a, P: image::Pixel<Subpixel=u8>, I: image::GenericImageView<Pixel=P>> {
+        Empty,
+        Leaf(&'a FName, &'a I),
+        Node(Vec<Slot<'a, P, I>>),
+    }
+    impl<'a, P: image::Pixel<Subpixel=u8>, I: image::GenericImageView<Pixel=P>> Slot<'a, P, I> {
+        fn new(x: u32, y: u32, width: u32, height: u32) -> Self {
+            Slot { x, y, width, height, data: SlotData::Empty }
+        }
+
+        fn fit(&mut self, name: &'a FName, sprite: &'a I) -> bool {
+            if let SlotData::Leaf(_, _) = self.data {
+                return false;
+            }
+
+            let sprite_width = sprite.width();
+            let sprite_height = sprite.height();
+            if self.width < sprite_width || self.height < sprite_height {
+                return false;
+            }
+            if self.width == sprite_width && self.height == sprite_height {
+                self.data = SlotData::Leaf(name, sprite);
+                return true;
+            }
+            if let SlotData::Empty = self.data {
+                let mut sub_slots = vec![Slot::new(self.x, self.y, sprite_width, sprite_height)];
+                let leftover_x = self.width - sprite_width;
+                let leftover_y = self.height - sprite_height;
+                if leftover_x == 0 {
+                    sub_slots.push(Slot::new(self.x, self.y + sprite_height, sprite_width, leftover_y));
+                } else if leftover_y == 0 {
+                    sub_slots.push(Slot::new(self.x + sprite_width, self.y, leftover_x, sprite_height));
+                } else if self.height < self.width {
+                    sub_slots.push(Slot::new(self.x + sprite_width, self.y, leftover_x, sprite_height));
+                    sub_slots.push(Slot::new(self.x, self.y + sprite_height, self.width, leftover_y));
+                } else {
+                    sub_slots.push(Slot::new(self.x, self.y + sprite_height, sprite_width, leftover_y));
+                    sub_slots.push(Slot::new(self.x + sprite_width, self.y, leftover_x, self.height));
+                }
+
+                self.data = SlotData::Node(sub_slots);
+            }
+            if let SlotData::Node(ref mut sub_slots) = self.data {
+                for sub_slot in sub_slots {
+                    if sub_slot.fit(name, sprite) {
+                        return true;
+                    }
+                }
+            } else {
+                unreachable!();
+            }
+            false
+        }
+
+        fn add_leafs(&'a self, leafs: &mut Vec<&Slot<'a, P, I>>) {
+            if let SlotData::Leaf(_, _) = self.data {
+                leafs.push(self);
+            } else if let SlotData::Node(ref sub_slots) = self.data {
+                for slot in sub_slots {
+                    slot.add_leafs(leafs);
+                }
+            }
+        }
+    }
+    let mut width = 0;
+    let mut height = 0;
+    let mut slots: Vec<Slot<P, I>> = Vec::with_capacity(256);
+
+    'texture_loop:
+    for (name, texture) in &textures {
+        for slot in &mut slots {
+            if slot.fit(name, texture) {
+                continue 'texture_loop;
+            }
+        }
+
+        // grow
+        let current_effective_width = util::round_up_power_of_two(width);
+        let current_effective_height = util::round_up_power_of_two(height);
+        let expanded_width = util::round_up_power_of_two(width + texture.width());
+        let expanded_height = util::round_up_power_of_two(height + texture.height());
+        let can_expand_x = expanded_width <= max_width;
+        let can_expand_y = expanded_height <= max_height;
+        if !can_expand_x && !can_expand_y {
+            return None;
+        }
+        let x_has_space_without_expanding = can_expand_x && current_effective_width != expanded_width;
+        let y_has_space_without_expanding = can_expand_y && current_effective_height != expanded_height;
+        let use_x = if x_has_space_without_expanding ^ y_has_space_without_expanding {
+            x_has_space_without_expanding
+        } else {
+            can_expand_x && current_effective_width <= current_effective_height
+        };
+
+        let mut slot = if use_x {
+            if height == 0 {
+                height = texture.height();
+            }
+            let slot = Slot::new(width, 0, texture.width(), height);
+            width += texture.width();
+            slot
+        } else {
+            let slot = Slot::new(0, height, width, texture.height());
+            height += texture.height();
+            slot
+        };
+
+        slot.fit(name, *texture);
+        slots.push(slot);
+    }
+
+    width = util::round_up_power_of_two(width);
+    height = util::round_up_power_of_two(height);
+
+    let mut leafs = Vec::with_capacity(textures.len());
+    for slot in &slots {
+        slot.add_leafs(&mut leafs);
+    }
+    struct AtlasWrapper<P: image::Pixel<Subpixel=u8>> {
+        atlas: *mut image::ImageBuffer<P, Vec<u8>>,
+    }
+    impl<P: image::Pixel<Subpixel=u8>> Clone for AtlasWrapper<P> {
+        fn clone(&self) -> Self {
+            AtlasWrapper { atlas: self.atlas, }
+        }
+    }
+    unsafe impl<P: image::Pixel<Subpixel=u8>> Send for AtlasWrapper<P> {}
+    unsafe impl<P: image::Pixel<Subpixel=u8>> Sync for AtlasWrapper<P> {}
+    let mut atlas: image::ImageBuffer<P, _> = image::ImageBuffer::new(width, height);
+    let atlas_wrapper: AtlasWrapper<P> = AtlasWrapper { atlas: &mut atlas, };
+    leafs.par_iter().for_each_with(atlas_wrapper, |atlas_wrapper, leaf| {
+        if let SlotData::Leaf(_, texture) = leaf.data {
+            unsafe {&mut *atlas_wrapper.atlas}.copy_from(texture, leaf.x, leaf.y).unwrap();
+        } else {
+            unreachable!();
+        }
+    });
+
+    Some(TextureAtlas {
+        width,
+        height,
+        data: atlas.into_raw(),
+        sprites: Default::default()
+    })
 }

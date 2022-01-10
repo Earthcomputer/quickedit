@@ -45,4 +45,7 @@ common_fnames! {
     LAVA = "lava";
     SAND = "sand";
     GRAVEL = "gravel";
+
+    // textures
+    MISSINGNO = "missingno";
 }

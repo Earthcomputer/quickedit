@@ -397,7 +397,7 @@ impl Dimension {
 pub struct World {
     level_dat: LevelDat,
     path: PathBuf,
-    resources: resources::Resources,
+    pub resources: resources::Resources,
     renderer: WorldRenderer,
     dimensions: FastDashMap<FName, Arc<Dimension>>,
 }

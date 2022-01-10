@@ -24,18 +24,18 @@ extern crate native_dialog;
 use std::path::PathBuf;
 use std::sync::Arc;
 use conrod_core::text;
-use glium::{
-    glutin::{dpi, event, event_loop, window, ContextBuilder},
-    Display,
-    index,
-    uniforms
-};
+use glium::{glutin::{dpi, event, event_loop, window, ContextBuilder}, Display, index, uniform};
 use glium::{implement_vertex, Surface};
 use image::GenericImageView;
 use winit::window::Icon;
 use structopt::StructOpt;
 use crate::fname::CommonFNames;
 use crate::util::ResourceLocation;
+
+#[allow(clippy::all)]
+mod gl {
+    include!(concat!(env!("OUT_DIR"), "/gl_bindings.rs"));
+}
 
 #[derive(StructOpt)]
 #[structopt(name = "mcedit_rs", about = "A Minecraft world editor")]
@@ -47,8 +47,9 @@ struct CmdLineArgs {
 #[derive(Copy, Clone)]
 struct Vertex {
     position: [f32; 2],
+    tex_coords: [f32; 2],
 }
-implement_vertex!(Vertex, position);
+implement_vertex!(Vertex, position, tex_coords);
 
 const WIDTH: f64 = 1920.0;
 const HEIGHT: f64 = 1080.0;
@@ -136,7 +137,16 @@ conrod_winit::v023_conversion_fns!();
 fn main() {
     let args: CmdLineArgs = CmdLineArgs::from_args();
 
-    if let Some(world_folder) = args.world {
+    let event_loop = event_loop::EventLoop::new();
+    let wb = window::WindowBuilder::new()
+        .with_title("MCEdit RS")
+        .with_window_icon(Some(ICON.with(|i| i.clone())))
+        .with_inner_size(dpi::LogicalSize::new(WIDTH, HEIGHT));
+    let cb = ContextBuilder::new();
+    let display = Display::new(wb, cb, &event_loop).unwrap();
+    gl::load_with(|s| display.gl_window().get_proc_address(s) as *const _);
+
+    let texture = if let Some(world_folder) = args.world {
         struct CmdLineInteractionHandler;
         impl minecraft::DownloadInteractionHandler for CmdLineInteractionHandler {
             fn show_download_prompt(&mut self, mc_version: &str) -> bool {
@@ -160,22 +170,35 @@ fn main() {
                 return;
             }
         };
+
+        let image = glium::texture::RawImage2d::from_raw_rgba_reversed(
+            &world.resources.block_atlas.data,
+            (world.resources.block_atlas.width, world.resources.block_atlas.height),
+        );
+        let texture = glium::texture::SrgbTexture2d::new(&display, image).unwrap();
+
         let mut worlds = world::WORLDS.write().unwrap();
         worlds.push(Arc::new(world));
-    }
 
-    let event_loop = event_loop::EventLoop::new();
-    let wb = window::WindowBuilder::new()
-        .with_title("MCEdit RS")
-        .with_window_icon(Some(ICON.with(|i| i.clone())))
-        .with_inner_size(dpi::LogicalSize::new(WIDTH, HEIGHT));
-    let cb = ContextBuilder::new();
-    let display = Display::new(wb, cb, &event_loop).unwrap();
+        texture
+    } else {
+        let image = image::load_from_memory_with_format(resources::MISSINGNO_DATA, image::ImageFormat::Png).unwrap().to_rgba8();
+        let width = image.width();
+        let height = image.height();
+        let image = glium::texture::RawImage2d::from_raw_rgba_reversed(
+            &image.into_raw(),
+            (width, height),
+        );
+        glium::texture::SrgbTexture2d::new(&display, image).unwrap()
+    };
 
-    let v1 = Vertex { position: [-0.5, -0.5] };
-    let v2 = Vertex { position: [0.0, 0.5] };
-    let v3 = Vertex { position: [0.5, -0.25] };
-    let shape = vec![v1, v2, v3];
+    // make a square
+    let v1 = Vertex { position: [-0.5, -0.5], tex_coords: [0.0, 0.0] };
+    let v2 = Vertex { position: [0.5, -0.5], tex_coords: [1.0, 0.0] };
+    let v3 = Vertex { position: [0.5, 0.5], tex_coords: [1.0, 1.0] };
+    let v4 = Vertex { position: [-0.5, 0.5], tex_coords: [0.0, 1.0] };
+    // make the square out of two triangles
+    let shape = vec![v1, v2, v3, v3, v4, v1];
 
     let vertex_buffer = glium::VertexBuffer::new(&display, &shape).unwrap();
     let indices = index::NoIndices(index::PrimitiveType::TrianglesList);
@@ -216,7 +239,18 @@ fn main() {
                 renderer.fill(display, primitives, &image_map);
                 let mut target = display.draw();
                 target.clear_color(0.0, 0.0, 0.0, 1.0);
-                target.draw(&vertex_buffer, &indices, &program, &uniforms::EmptyUniforms, &Default::default()).unwrap();
+
+
+                let uniforms = uniform! {
+                    matrix: [
+                        [1.0, 0.0, 0.0, 0.0],
+                        [0.0, 1.0, 0.0, 0.0],
+                        [0.0, 0.0, 1.0, 0.0],
+                        [0.0, 0.0, 0.0, 1.0f32],
+                    ],
+                    tex: &texture,
+                };
+                target.draw(&vertex_buffer, &indices, &program, &uniforms, &Default::default()).unwrap();
                 renderer.draw(display, &mut target, &image_map).unwrap();
                 target.finish().unwrap();
             }

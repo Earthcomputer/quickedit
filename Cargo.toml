@@ -16,6 +16,7 @@ conrod_glium = "0.76.0"
 conrod_winit = "0.76.0"
 native-dialog = "0.6.1"
 num-integer = "0.1.44"
+num-traits = "0.2.14"
 internment = { version = "0.5.5", features = ["arc"] }
 dashmap = "5.0.0"
 hematite-nbt = { git = "https://github.com/PistonDevelopers/hematite_nbt", rev = "ce60b81" }
@@ -37,9 +38,11 @@ futures-lite = "1.12.0"
 async-executor = "1.4.1"
 attohttpc = "0.18.0"
 structopt = "0.3.25"
+rayon = "1.5.1"
 
 [build-dependencies]
 winres = "0.1.12"
+gl_generator = "0.14.0"
 
 [package.metadata.bundle]
 identifier = "net.earthcomputer.mcedit_rs"
