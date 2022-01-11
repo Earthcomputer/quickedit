@@ -5,6 +5,7 @@ use std::path::{Path, PathBuf};
 use std::str::FromStr;
 use dashmap::DashMap;
 use delegate::delegate;
+use rayon::prelude::*;
 use serde::Deserialize;
 use serde_with::DeserializeFromStr;
 
@@ -236,4 +237,24 @@ pub fn round_up_power_of_two<T: num_traits::PrimInt>(n: T) -> T {
         return T::one();
     }
     T::one() << (T::zero().count_zeros() - (n - T::one()).leading_zeros()) as usize
+}
+
+pub unsafe fn parallel_iter_to_output<'data, D, O, F>(data: &'data D, output: &mut O, func: F)
+where
+    D: IntoParallelRefIterator<'data>,
+    F: Fn(D::Item, &mut O) + Sync + Send,
+{
+    struct OutputWrapper<O>(*mut O);
+    unsafe impl<O> Send for OutputWrapper<O> {}
+    unsafe impl<O> Sync for OutputWrapper<O> {}
+    impl<O> Clone for OutputWrapper<O> {
+        fn clone(&self) -> Self {
+            OutputWrapper(self.0)
+        }
+    }
+
+    let wrapper = OutputWrapper(output);
+    data.par_iter().for_each_with(wrapper, |wrapper, item| {
+        func(item, &mut *wrapper.0);
+    });
 }

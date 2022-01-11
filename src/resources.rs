@@ -7,7 +7,6 @@ use ahash::{AHashMap, AHashSet};
 use image::{GenericImage, GenericImageView};
 use lazy_static::lazy_static;
 use path_slash::{PathBufExt, PathExt};
-use rayon::prelude::*;
 use crate::{gl, minecraft, ResourceLocation, util, world};
 use serde::{Deserialize, Deserializer};
 use serde::de::{Error, IntoDeserializer};
@@ -857,25 +856,16 @@ fn stitch<P: image::Pixel<Subpixel=u8> + 'static, I: image::GenericImageView<Pix
     for slot in &slots {
         slot.add_leafs(&mut leafs);
     }
-    struct AtlasWrapper<P: image::Pixel<Subpixel=u8>> {
-        atlas: *mut image::ImageBuffer<P, Vec<u8>>,
-    }
-    impl<P: image::Pixel<Subpixel=u8>> Clone for AtlasWrapper<P> {
-        fn clone(&self) -> Self {
-            AtlasWrapper { atlas: self.atlas, }
-        }
-    }
-    unsafe impl<P: image::Pixel<Subpixel=u8>> Send for AtlasWrapper<P> {}
-    unsafe impl<P: image::Pixel<Subpixel=u8>> Sync for AtlasWrapper<P> {}
     let mut atlas: image::ImageBuffer<P, _> = image::ImageBuffer::new(width, height);
-    let atlas_wrapper: AtlasWrapper<P> = AtlasWrapper { atlas: &mut atlas, };
-    leafs.par_iter().for_each_with(atlas_wrapper, |atlas_wrapper, leaf| {
-        if let SlotData::Leaf(_, texture) = leaf.data {
-            unsafe {&mut *atlas_wrapper.atlas}.copy_from(texture, leaf.x, leaf.y).unwrap();
-        } else {
-            unreachable!();
-        }
-    });
+    unsafe {
+        util::parallel_iter_to_output(&leafs, &mut atlas, |leaf, atlas| {
+            if let SlotData::Leaf(_, texture) = leaf.data {
+                atlas.copy_from(texture, leaf.x, leaf.y).unwrap();
+            } else {
+                unreachable!();
+            }
+        });
+    }
 
     Some(TextureAtlas {
         width,
