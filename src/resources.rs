@@ -7,11 +7,12 @@ use ahash::{AHashMap, AHashSet};
 use image::{GenericImage, GenericImageView};
 use lazy_static::lazy_static;
 use path_slash::{PathBufExt, PathExt};
-use crate::{gl, minecraft, ResourceLocation, util, world};
+use crate::{fname, gl, minecraft, ResourceLocation, util, world};
 use serde::{Deserialize, Deserializer};
 use serde::de::{Error, IntoDeserializer};
 use crate::fname::FName;
 use crate::fname::CommonFNames;
+use crate::world::IBlockState;
 
 lazy_static! {
     static ref MAX_SUPPORTED_TEXTURE_SIZE: u32 = {
@@ -41,8 +42,8 @@ pub const MISSINGNO_DATA: &[u8] = include_bytes!("../res/missingno.png");
 
 #[derive(Default)]
 pub struct Resources {
-    blockstates: AHashMap<ResourceLocation, BlockstateFile>,
-    block_models: AHashMap<ResourceLocation, BlockModel>,
+    blockstates: AHashMap<FName, BlockstateFile>,
+    block_models: AHashMap<FName, BlockModel>,
     pub block_atlas: TextureAtlas,
 }
 
@@ -161,7 +162,7 @@ impl Resources {
                         continue;
                     }
                 };
-                resources.blockstates.entry(ResourceLocation::new(&namespace, block_name)).or_insert(blockstate);
+                resources.blockstates.entry(FName::new(ResourceLocation::new(&namespace, block_name))).or_insert(blockstate);
             }
         }
     }
@@ -176,8 +177,8 @@ impl Resources {
         for blockstate in resources.blockstates.values() {
             match blockstate {
                 BlockstateFile::Variants(variants) => {
-                    for variants in variants.values() {
-                        for variant in variants.deref() {
+                    for pair in &variants.pairs {
+                        for variant in pair.value.deref() {
                             models_to_load.insert(variant.model.clone());
                         }
                     }
@@ -225,7 +226,7 @@ impl Resources {
             loaded_models.insert(model_id, RefCell::new(Some(model)));
         }
 
-        fn flatten_model(model_id: &ResourceLocation, partial_models: &AHashMap<ResourceLocation, RefCell<Option<PartialBlockModel>>>, visited_models: &mut AHashSet<ResourceLocation>) {
+        fn flatten_model(model_id: &FName, partial_models: &AHashMap<FName, RefCell<Option<PartialBlockModel>>>, visited_models: &mut AHashSet<FName>) {
             let model_ref = &partial_models[model_id];
             if visited_models.contains(model_id) {
                 *model_ref.borrow_mut() = None;
@@ -440,19 +441,117 @@ impl Resources {
 
         Some(resources)
     }
+
+    pub fn get_block_model(&self, state: &IBlockState) -> Option<Vec<TransformedModel>> {
+        let blockstate = self.blockstates.get(&state.block)?;
+
+        let model_variants = match blockstate {
+            BlockstateFile::Variants(variants) => {
+                let mut model_variant = None;
+                for pair in &variants.pairs {
+                    if pair.properties.iter().all(|(k, v)| state.properties.get(k).map(|v2| v == v2).unwrap_or(true)) {
+                        model_variant = Some(pair.value.deref().first()?);
+                        break;
+                    }
+                }
+                vec![model_variant?] // TODO: pick a random one
+            }
+            BlockstateFile::Multipart(cases) => {
+                let mut model_variants = Vec::new();
+                'case_loop:
+                for case in cases {
+                    fn does_when_match(when: &MultipartWhen, state: &IBlockState) -> bool {
+                        match when {
+                            MultipartWhen::Union(union) => {
+                                union.iter().any(|when| does_when_match(when, state))
+                            }
+                            MultipartWhen::Intersection(intersection) => {
+                                intersection.iter().all(|(prop, values)| state.properties.get(prop).map(|v| values.contains(v)).unwrap_or(true))
+                            }
+                        }
+                    }
+                    for when in &case.when {
+                        if !does_when_match(when, state) {
+                            continue 'case_loop;
+                        }
+                    }
+                    for apply in case.apply.deref() {
+                        model_variants.push(apply);
+                    }
+                }
+                model_variants
+            }
+        };
+
+        if model_variants.is_empty() {
+            return None;
+        }
+
+        let mut transformed_models = Vec::new();
+        for model_variant in model_variants {
+            let model = self.block_models.get(&model_variant.model)?;
+            let transformed_model = TransformedModel {
+                model,
+                x_rotation: model_variant.x,
+                y_rotation: model_variant.y,
+                uvlock: model_variant.uvlock
+            };
+            transformed_models.push(transformed_model);
+        }
+        Some(transformed_models)
+    }
 }
 
 #[derive(Deserialize)]
-pub enum BlockstateFile {
+enum BlockstateFile {
     #[serde(rename = "variants")]
-    Variants(AHashMap<String, util::ListOrSingleT<ModelVariant>>),
+    Variants(VariantPairs),
     #[serde(rename = "multipart")]
     Multipart(Vec<MultipartCase>),
 }
 
+struct VariantPairs {
+    pairs: Vec<VariantPair>,
+}
+
+struct VariantPair {
+    properties: AHashMap<FName, FName>,
+    value: util::ListOrSingleT<ModelVariant>,
+}
+
+impl<'de> Deserialize<'de> for VariantPairs {
+    fn deserialize<D>(deserializer: D) -> Result<Self, D::Error> where D: Deserializer<'de> {
+        struct MyVisitor;
+        impl<'de> serde::de::Visitor<'de> for MyVisitor {
+            type Value = VariantPairs;
+
+            fn expecting(&self, formatter: &mut fmt::Formatter) -> fmt::Result {
+                formatter.write_str("a map of variants")
+            }
+
+            fn visit_map<V>(self, mut map: V) -> Result<Self::Value, V::Error> where V: serde::de::MapAccess<'de> {
+                let mut pairs = Vec::new();
+                while let Some((key, value)) = map.next_entry::<String, util::ListOrSingleT<ModelVariant>>()? {
+                    let mut properties = AHashMap::new();
+                    for prop in key.split(',') {
+                        if prop.is_empty() {
+                            continue;
+                        }
+                        let (prop, val) = prop.split_at(prop.find('=').ok_or_else(|| V::Error::custom("Invalid variant key format"))?);
+                        properties.insert(fname::from_str(prop), fname::from_str(val));
+                    }
+                    pairs.push(VariantPair{ properties, value });
+                }
+                Ok(VariantPairs{pairs})
+            }
+        }
+        deserializer.deserialize_map(MyVisitor{})
+    }
+}
+
 #[derive(Deserialize)]
-pub struct ModelVariant {
-    model: util::ResourceLocation,
+struct ModelVariant {
+    model: FName,
     #[serde(default)]
     x: i32,
     #[serde(default)]
@@ -463,19 +562,26 @@ pub struct ModelVariant {
     weight: i32,
 }
 
+pub struct TransformedModel<'a> {
+    pub model: &'a BlockModel,
+    pub x_rotation: i32,
+    pub y_rotation: i32,
+    pub uvlock: bool,
+}
+
 fn default_one<T: num_traits::PrimInt>() -> T {
     T::one()
 }
 
 #[derive(Deserialize)]
-pub struct MultipartCase {
+struct MultipartCase {
     when: Option<MultipartWhen>,
     apply: util::ListOrSingleT<ModelVariant>,
 }
 
-pub enum MultipartWhen {
+enum MultipartWhen {
     Union(Vec<MultipartWhen>),
-    Intersection(AHashMap<String, Vec<String>>),
+    Intersection(AHashMap<FName, Vec<FName>>),
 }
 
 impl<'de> Deserialize<'de> for MultipartWhen {
@@ -491,7 +597,10 @@ impl<'de> Deserialize<'de> for MultipartWhen {
             fn visit_map<V>(self, mut map: V) -> Result<MultipartWhen, V::Error> where V: serde::de::MapAccess<'de> {
                 let mut result = MultipartWhen::Intersection(AHashMap::new());
                 while let Some(key) = map.next_key()? {
-                    if key == "OR" {
+                    lazy_static! {
+                        static ref OR: FName = fname::from_str("OR");
+                    }
+                    if key == *OR {
                         let value: Vec<MultipartWhen> = map.next_value()?;
                         let allowed = match &result {
                             MultipartWhen::Union(_) => false,
@@ -507,7 +616,7 @@ impl<'de> Deserialize<'de> for MultipartWhen {
                             MultipartWhen::Union(_) => return Err(serde::de::Error::custom("OR cannot be mixed with other conditions")),
                             MultipartWhen::Intersection(map) => {
                                 // deserialize value to string
-                                map.insert(key, value.split('|').map(|s| s.to_string()).collect());
+                                map.insert(key, value.split('|').map(fname::from_str).collect());
                             },
                         }
                     }
@@ -527,7 +636,7 @@ pub struct BlockModel {
 
 #[derive(Deserialize)]
 struct PartialBlockModel {
-    parent: Option<util::ResourceLocation>,
+    parent: Option<FName>,
     #[serde(rename = "ambientocclusion", default = "default_true")]
     ambient_occlusion: bool,
     #[serde(default)]
@@ -712,7 +821,13 @@ pub struct TextureAtlas {
     pub width: u32,
     pub height: u32,
     pub data: Vec<u8>,
-    pub sprites: AHashMap<FName, Sprite>,
+    sprites: AHashMap<FName, Sprite>,
+}
+
+impl TextureAtlas {
+    pub fn get_sprite(&self, name: &FName) -> Option<&Sprite> {
+        self.sprites.get(name)
+    }
 }
 
 pub struct Sprite {
@@ -866,11 +981,23 @@ fn stitch<P: image::Pixel<Subpixel=u8> + 'static, I: image::GenericImageView<Pix
             }
         });
     }
+    let sprites = leafs.iter().map(|leaf| {
+        if let SlotData::Leaf(name, _) = leaf.data {
+            (name.clone(), Sprite {
+                u1: leaf.x,
+                v1: leaf.y,
+                u2: leaf.x + leaf.width,
+                v2: leaf.y + leaf.height,
+            })
+        } else {
+            unreachable!()
+        }
+    }).collect();
 
     Some(TextureAtlas {
         width,
         height,
         data: atlas.into_raw(),
-        sprites: Default::default()
+        sprites,
     })
 }

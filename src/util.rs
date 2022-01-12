@@ -5,9 +5,18 @@ use std::path::{Path, PathBuf};
 use std::str::FromStr;
 use dashmap::DashMap;
 use delegate::delegate;
+use glium::implement_vertex;
 use rayon::prelude::*;
 use serde::Deserialize;
 use serde_with::DeserializeFromStr;
+
+#[derive(Copy, Clone)]
+pub struct Vertex {
+    pub position: [f32; 3],
+    pub tex_coords: [f32; 2],
+    pub lightmap_coords: [f32; 2],
+}
+implement_vertex!(Vertex, position, tex_coords, lightmap_coords);
 
 #[derive(Debug, Clone, PartialEq, Eq, Hash, DeserializeFromStr)]
 pub struct ResourceLocation {
@@ -67,7 +76,6 @@ pub type FastDashMap<K, V> = DashMap<K, V, ahash::RandomState>;
 pub fn make_fast_dash_map<K, V>() -> FastDashMap<K, V>
 where
     K: Eq + Hash + Clone,
-    V: Clone,
 {
     DashMap::with_hasher(ahash::RandomState::default())
 }

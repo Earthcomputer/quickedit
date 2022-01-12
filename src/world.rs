@@ -37,9 +37,9 @@ impl ChunkPos {
 
 #[derive(Debug, Clone, Copy, PartialEq, Eq, Hash)]
 pub struct Pos<T> {
-    x: T,
-    y: T,
-    z: T,
+    pub x: T,
+    pub y: T,
+    pub z: T,
 }
 
 impl<T> Pos<T> {
@@ -78,8 +78,8 @@ pub enum Direction {
 
 #[derive(Debug, Clone, PartialEq, Eq)]
 pub struct BlockState {
-    block: FName,
-    properties: HashMap<FName, FName>,
+    pub block: FName,
+    pub properties: HashMap<FName, FName>,
 }
 
 #[allow(clippy::derive_hash_xor_eq)]
@@ -100,9 +100,9 @@ impl Hash for BlockState {
 pub type IBlockState = ArcIntern<BlockState>;
 
 impl BlockState {
-    pub fn new(block: FName) -> Self {
+    pub fn new(block: &FName) -> Self {
         BlockState {
-            block,
+            block: block.clone(),
             properties: HashMap::new(),
         }
     }
@@ -335,7 +335,7 @@ impl Dimension {
                                 match palette_elem {
                                     nbt::Value::Compound(palette_map) => {
                                         if let Some(nbt::Value::String(name)) = palette_map.get("Name") {
-                                            let mut block_state = BlockState::new(FName::new(name.parse().unwrap()));
+                                            let mut block_state = BlockState::new(&FName::new(name.parse().unwrap()));
                                             if let Some(nbt::Value::Compound(properties)) = palette_map.get("Properties") {
                                                 let mut valid = true;
                                                 block_state.properties = properties.iter().map(|(k, v)| (FName::new(k.parse().unwrap()), FName::new(match v {
@@ -398,7 +398,7 @@ pub struct World {
     level_dat: LevelDat,
     path: PathBuf,
     pub resources: resources::Resources,
-    renderer: WorldRenderer,
+    pub renderer: WorldRenderer,
     dimensions: FastDashMap<FName, Arc<Dimension>>,
 }
 
@@ -411,7 +411,7 @@ impl World {
             Some(r) => r,
             None => return Err(io::Error::new(io::ErrorKind::Other, "Failed to load resources")),
         };
-        let renderer = WorldRenderer::new(&mc_version);
+        let renderer = WorldRenderer::new(&mc_version, &resources);
         let world = World {
             level_dat,
             path,

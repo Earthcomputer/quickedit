@@ -17,7 +17,7 @@ conrod_winit = "0.76.0"
 native-dialog = "0.6.1"
 num-integer = "0.1.44"
 num-traits = "0.2.14"
-internment = { version = "0.5.5", features = ["arc"] }
+internment = { version = "0.5.5", features = ["arc", "serde"] }
 dashmap = "5.0.0"
 hematite-nbt = { git = "https://github.com/PistonDevelopers/hematite_nbt", rev = "ce60b81" }
 positioned-io-preview = "0.3.3"

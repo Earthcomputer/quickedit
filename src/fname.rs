@@ -7,6 +7,10 @@ use crate::ResourceLocation;
 
 pub type FName = ArcIntern<ResourceLocation>;
 
+pub fn from_str<T: Into<String>>(s: T) -> FName {
+    FName::new(ResourceLocation::minecraft(s))
+}
+
 macro_rules! common_fnames {
     ($($name:ident = $value:expr;)*) => {
         pub struct _CommonFNames {

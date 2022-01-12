@@ -3,6 +3,7 @@
 #![feature(option_result_contains)]
 #![feature(can_vector)]
 #![feature(read_buf)]
+#![feature(try_find)]
 
 #![allow(dead_code)]
 #![allow(clippy::needless_return)]
@@ -24,8 +25,8 @@ extern crate native_dialog;
 use std::path::PathBuf;
 use std::sync::Arc;
 use conrod_core::text;
-use glium::{glutin::{dpi, event, event_loop, window, ContextBuilder}, Display, index, uniform};
-use glium::{implement_vertex, Surface};
+use glium::{glutin::{dpi, event, event_loop, window, ContextBuilder}, Display};
+use glium::Surface;
 use image::GenericImageView;
 use winit::window::Icon;
 use structopt::StructOpt;
@@ -44,18 +45,8 @@ struct CmdLineArgs {
     world: Option<PathBuf>,
 }
 
-#[derive(Copy, Clone)]
-struct Vertex {
-    position: [f32; 2],
-    tex_coords: [f32; 2],
-}
-implement_vertex!(Vertex, position, tex_coords);
-
 const WIDTH: f64 = 1920.0;
 const HEIGHT: f64 = 1080.0;
-
-const MAIN_VERT_SHADER: &str = include_str!("../res/main.vsh");
-const MAIN_FRAG_SHADER: &str = include_str!("../res/main.fsh");
 
 const FONT_DATA: &[u8] = include_bytes!("../res/MinecraftRegular-Bmg3.ttf");
 const ICON_DATA: &[u8] = include_bytes!("../res/icon_32x32.png");
@@ -144,9 +135,12 @@ fn main() {
         .with_inner_size(dpi::LogicalSize::new(WIDTH, HEIGHT));
     let cb = ContextBuilder::new();
     let display = Display::new(wb, cb, &event_loop).unwrap();
+    unsafe {
+        world_renderer::set_display(&display);
+    }
     gl::load_with(|s| display.gl_window().get_proc_address(s) as *const _);
 
-    let texture = if let Some(world_folder) = args.world {
+    if let Some(world_folder) = args.world {
         struct CmdLineInteractionHandler;
         impl minecraft::DownloadInteractionHandler for CmdLineInteractionHandler {
             fn show_download_prompt(&mut self, mc_version: &str) -> bool {
@@ -171,39 +165,9 @@ fn main() {
             }
         };
 
-        let image = glium::texture::RawImage2d::from_raw_rgba_reversed(
-            &world.resources.block_atlas.data,
-            (world.resources.block_atlas.width, world.resources.block_atlas.height),
-        );
-        let texture = glium::texture::SrgbTexture2d::new(&display, image).unwrap();
-
         let mut worlds = world::WORLDS.write().unwrap();
         worlds.push(Arc::new(world));
-
-        texture
-    } else {
-        let image = image::load_from_memory_with_format(resources::MISSINGNO_DATA, image::ImageFormat::Png).unwrap().to_rgba8();
-        let width = image.width();
-        let height = image.height();
-        let image = glium::texture::RawImage2d::from_raw_rgba_reversed(
-            &image.into_raw(),
-            (width, height),
-        );
-        glium::texture::SrgbTexture2d::new(&display, image).unwrap()
-    };
-
-    // make a square
-    let v1 = Vertex { position: [-0.5, -0.5], tex_coords: [0.0, 0.0] };
-    let v2 = Vertex { position: [0.5, -0.5], tex_coords: [1.0, 0.0] };
-    let v3 = Vertex { position: [0.5, 0.5], tex_coords: [1.0, 1.0] };
-    let v4 = Vertex { position: [-0.5, 0.5], tex_coords: [0.0, 1.0] };
-    // make the square out of two triangles
-    let shape = vec![v1, v2, v3, v3, v4, v1];
-
-    let vertex_buffer = glium::VertexBuffer::new(&display, &shape).unwrap();
-    let indices = index::NoIndices(index::PrimitiveType::TrianglesList);
-
-    let program = glium::Program::from_source(&display, MAIN_VERT_SHADER, MAIN_FRAG_SHADER, None).unwrap();
+    }
 
     let mut my_ui = conrod_core::UiBuilder::new([WIDTH, HEIGHT]).build();
     let image_map = conrod_core::image::Map::<glium::texture::Texture2d>::new();
@@ -213,7 +177,14 @@ fn main() {
 
     let ids = ui::init_ui(&mut my_ui);
 
+    unsafe {
+        world_renderer::clear_display();
+    }
+
     run_loop(display, event_loop, move |request, display| {
+        unsafe {
+            world_renderer::set_display(display);
+        }
         match request {
             Request::Event {
                 event,
@@ -240,20 +211,19 @@ fn main() {
                 let mut target = display.draw();
                 target.clear_color(0.0, 0.0, 0.0, 1.0);
 
+                {
+                    let worlds = world::WORLDS.read().unwrap();
+                    if let Some(world) = worlds.last() {
+                        world.renderer.render_world(world, &mut target);
+                    }
+                }
 
-                let uniforms = uniform! {
-                    matrix: [
-                        [1.0, 0.0, 0.0, 0.0],
-                        [0.0, 1.0, 0.0, 0.0],
-                        [0.0, 0.0, 1.0, 0.0],
-                        [0.0, 0.0, 0.0, 1.0f32],
-                    ],
-                    tex: &texture,
-                };
-                target.draw(&vertex_buffer, &indices, &program, &uniforms, &Default::default()).unwrap();
                 renderer.draw(display, &mut target, &image_map).unwrap();
                 target.finish().unwrap();
             }
+        }
+        unsafe {
+            world_renderer::clear_display();
         }
     });
 }
