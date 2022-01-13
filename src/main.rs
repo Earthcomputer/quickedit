@@ -22,8 +22,9 @@ extern crate conrod_winit;
 extern crate glium;
 extern crate native_dialog;
 
+use std::cell::RefCell;
 use std::path::PathBuf;
-use std::sync::Arc;
+use std::rc::Rc;
 use conrod_core::text;
 use glium::{glutin::{dpi, event, event_loop, window, ContextBuilder}, Display};
 use glium::Surface;
@@ -31,6 +32,7 @@ use image::GenericImageView;
 use winit::window::Icon;
 use structopt::StructOpt;
 use crate::fname::CommonFNames;
+use crate::ui::UiState;
 use crate::util::ResourceLocation;
 
 #[allow(clippy::all)]
@@ -70,7 +72,7 @@ enum Request<'a, 'b: 'a> {
     Redraw,
 }
 
-fn run_loop<F>(display: Display, event_loop: event_loop::EventLoop<()>, mut callback: F) -> !
+fn run_loop<F>(display: Display, event_loop: event_loop::EventLoop<()>, ui_state: Rc<RefCell<UiState>>, mut callback: F) -> !
 where
     F: 'static + FnMut(Request, &Display),
 {
@@ -105,7 +107,7 @@ where
                 }, &display);
                 if needs_redraw {
                     display.gl_window().window().request_redraw();
-                } else {
+                } else if !ui::needs_tick(&*(*ui_state).borrow()) {
                     next_update = None;
                 }
             }
@@ -166,7 +168,7 @@ fn main() {
         };
 
         let mut worlds = world::WORLDS.write().unwrap();
-        worlds.push(Arc::new(world));
+        worlds.push(world::WorldRef(world));
     }
 
     let mut my_ui = conrod_core::UiBuilder::new([WIDTH, HEIGHT]).build();
@@ -175,13 +177,13 @@ fn main() {
 
     my_ui.fonts.insert(text::Font::from_bytes(FONT_DATA).unwrap());
 
-    let ids = ui::init_ui(&mut my_ui);
+    let ui_state = Rc::new(RefCell::new(ui::init_ui(&mut my_ui)));
 
     unsafe {
         world_renderer::clear_display();
     }
 
-    run_loop(display, event_loop, move |request, display| {
+    run_loop(display, event_loop, ui_state.clone(), move |request, display| {
         unsafe {
             world_renderer::set_display(display);
         }
@@ -192,6 +194,7 @@ fn main() {
                 should_exit,
             } => {
                 if let Some(event) = convert_event(event, display.gl_window().window()) {
+                    ui::handle_event(&mut *ui_state.borrow_mut(), &event);
                     my_ui.handle_event(event);
                     *should_update_ui = true;
                 }
@@ -202,8 +205,12 @@ fn main() {
             },
             Request::SetUi { needs_redraw } => {
                 let my_ui = &mut my_ui.set_widgets();
-                ui::set_ui(&ids, my_ui);
-                *needs_redraw = my_ui.has_changed();
+                ui::set_ui(&*(*ui_state).borrow(), my_ui);
+                ui::tick(&*(*ui_state).borrow());
+                *needs_redraw = my_ui.has_changed() || {
+                    let worlds = world::WORLDS.read().unwrap();
+                    worlds.iter().any(|world| world.unwrap().renderer.has_changed())
+                };
             },
             Request::Redraw => {
                 let primitives = my_ui.draw();
@@ -214,7 +221,7 @@ fn main() {
                 {
                     let worlds = world::WORLDS.read().unwrap();
                     if let Some(world) = worlds.last() {
-                        world.renderer.render_world(world, &mut target);
+                        world.unwrap().renderer.render_world(world.unwrap(), &mut target);
                     }
                 }
 

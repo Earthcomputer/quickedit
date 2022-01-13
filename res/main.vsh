@@ -6,10 +6,11 @@ in vec2 lightmap_coords;
 out vec2 v_tex_coords;
 out vec2 v_lightmap_coords;
 
-uniform mat4 matrix;
+uniform mat4 projection_matrix;
+uniform mat4 view_matrix;
 
 void main() {
     v_tex_coords = tex_coords;
     v_lightmap_coords = lightmap_coords;
-    gl_Position = matrix * vec4(position, 1.0);
+    gl_Position = projection_matrix * view_matrix * vec4(position, 1.0);
 }

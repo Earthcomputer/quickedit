@@ -1,5 +1,6 @@
+use glam::{EulerRot, Mat4, Quat};
 use glium::{Surface, uniform};
-use crate::{CommonFNames, util};
+use crate::{CommonFNames, util, world};
 use crate::resources::{Resources, TextureAtlas};
 use crate::util::{FastDashMap, make_fast_dash_map};
 use crate::world::{BlockPos, BlockState, IBlockState, World};
@@ -71,13 +72,21 @@ impl WorldRenderer {
     pub fn render_world(&self, world: &World, target: &mut glium::Frame) {
         let mut geometry = Geometry::default();
         self.render_state(world, &IBlockState::new(BlockState::new(&CommonFNames.STONE)), BlockPos::new(0, 0, 0), &mut geometry);
+
+        let fov = 70.0f32;
+        let aspect_ratio = target.get_dimensions().0 as f32 / target.get_dimensions().1 as f32;
+        let znear = 0.05f32;
+        let render_distance_chunks = 16.0f32;
+        let zfar = render_distance_chunks * 64.0;
+        let projection = Mat4::perspective_rh(fov.to_radians(), aspect_ratio, znear, zfar);
+        let camera_pos = world::Pos::<f32>::from(world.camera.pos).to_glam();
+        let camera_yaw = world.camera.yaw.to_radians();
+        let camera_pitch = world.camera.pitch.to_radians();
+        let view_matrix = Mat4::from_rotation_translation(Quat::from_euler(EulerRot::XYZ, camera_pitch, camera_yaw, 0.0), camera_pos);
+
         let uniforms = uniform! {
-                    matrix: [
-                        [1.0, 0.0, 0.0, 0.0],
-                        [0.0, 1.0, 0.0, 0.0],
-                        [0.0, 0.0, 1.0, 0.0],
-                        [0.0, 0.0, 0.0, 1.0f32],
-                    ],
+                    projection_matrix: projection.to_cols_array_2d(),
+                    view_matrix: view_matrix.to_cols_array_2d(),
                     tex: &self.block_atlas_texture,
                     ambient_light: 0.1f32,
                     sky_brightness: 0.0f32,

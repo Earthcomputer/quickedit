@@ -39,6 +39,7 @@ async-executor = "1.4.1"
 attohttpc = "0.18.0"
 structopt = "0.3.25"
 rayon = "1.5.1"
+glam = "0.20.2"
 
 [build-dependencies]
 winres = "0.1.12"

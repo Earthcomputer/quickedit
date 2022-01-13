@@ -1,5 +1,6 @@
 use std::collections::HashMap;
 use std::{fs, io, mem};
+use std::borrow::{Borrow, BorrowMut};
 use std::collections::hash_map::DefaultHasher;
 use std::hash::{Hash, Hasher};
 use std::io::Cursor;
@@ -20,10 +21,10 @@ use crate::util::{FastDashMap, make_fast_dash_map};
 use crate::world_renderer::WorldRenderer;
 
 lazy_static! {
-    pub static ref WORLDS: RwLock<Vec<Arc<World>>> = RwLock::new(Vec::new());
+    pub static ref WORLDS: RwLock<Vec<WorldRef>> = RwLock::new(Vec::new());
 }
 
-#[derive(Debug, Clone, Copy, PartialEq, Eq, Hash)]
+#[derive(Debug, Default, Clone, Copy, PartialEq, Eq, Hash)]
 pub struct ChunkPos {
     x: i32,
     z: i32,
@@ -35,7 +36,7 @@ impl ChunkPos {
     }
 }
 
-#[derive(Debug, Clone, Copy, PartialEq, Eq, Hash)]
+#[derive(Debug, Default, Clone, Copy, PartialEq, Eq, Hash)]
 pub struct Pos<T> {
     pub x: T,
     pub y: T,
@@ -47,6 +48,49 @@ impl<T> Pos<T> {
         Pos { x, y, z }
     }
 }
+
+macro_rules! pos_conversion_functions {
+    ($type:ty $(,$other_types:ty)*) => {
+        $(
+        impl From<Pos<$other_types>> for Pos<$type> {
+            fn from(pos: Pos<$other_types>) -> Self {
+                Pos::new(pos.x as $type, pos.y as $type, pos.z as $type)
+            }
+        }
+        )*
+    };
+}
+macro_rules! pos_glam_conversion_functions {
+    ($type:ty, $glam_type:ty) => {
+        impl From<Pos<$type>> for $glam_type {
+            fn from(pos: Pos<$type>) -> Self {
+                <$glam_type>::new(pos.x, pos.y, pos.z)
+            }
+        }
+
+        impl From<$glam_type> for Pos<$type> {
+            fn from(pos: $glam_type) -> Self {
+                Pos::new(pos.x, pos.y, pos.z)
+            }
+        }
+
+        impl Pos<$type> {
+            pub fn to_glam(self) -> $glam_type {
+                <$glam_type>::new(self.x, self.y, self.z)
+            }
+        }
+    };
+}
+pos_conversion_functions!(f32, f64, i32, i64, u32, u64);
+pos_conversion_functions!(f64, f32, i32, i64, u32, u64);
+pos_conversion_functions!(i32, f32, f64, i64, u32, u64);
+pos_conversion_functions!(u32, f32, f64, i32, i64, u64);
+pos_conversion_functions!(i64, f32, f64, i32, u32, u64);
+pos_conversion_functions!(u64, f32, f64, i32, i64, u32);
+pos_glam_conversion_functions!(f32, glam::Vec3);
+pos_glam_conversion_functions!(f64, glam::DVec3);
+pos_glam_conversion_functions!(i32, glam::IVec3);
+pos_glam_conversion_functions!(u32, glam::UVec3);
 
 pub type BlockPos = Pos<i32>;
 
@@ -394,7 +438,47 @@ impl Dimension {
     }
 }
 
+#[derive(Default)]
+pub struct Camera {
+    pub pos: Pos<f64>,
+    pub yaw: f32,
+    pub pitch: f32,
+}
+
+impl Camera {
+    pub fn move_camera(&mut self, x: f64, y: f64, z: f64, yaw: f32, pitch: f32) {
+        self.pos.x += x;
+        self.pos.y += y;
+        self.pos.z += z;
+        self.yaw = (self.yaw + yaw).clamp(-180.0, 180.0);
+        self.pitch = (self.pitch + pitch).clamp(-90.0, 90.0);
+    }
+}
+
+pub struct WorldRef(pub World);
+unsafe impl Send for WorldRef {}
+unsafe impl Sync for WorldRef {}
+impl WorldRef {
+    pub fn unwrap(&self) -> &World {
+        &self.0
+    }
+    pub fn unwrap_mut(&mut self) -> &mut World {
+        &mut self.0
+    }
+}
+impl Borrow<World> for WorldRef {
+    fn borrow(&self) -> &World {
+        &self.0
+    }
+}
+impl BorrowMut<World> for WorldRef {
+    fn borrow_mut(&mut self) -> &mut World {
+        &mut self.0
+    }
+}
+
 pub struct World {
+    pub camera: Camera,
     level_dat: LevelDat,
     path: PathBuf,
     pub resources: resources::Resources,
@@ -413,6 +497,7 @@ impl World {
         };
         let renderer = WorldRenderer::new(&mc_version, &resources);
         let world = World {
+            camera: Camera::default(),
             level_dat,
             path,
             resources,
