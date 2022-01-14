@@ -135,7 +135,7 @@ fn main() {
         .with_title("MCEdit RS")
         .with_window_icon(Some(ICON.with(|i| i.clone())))
         .with_inner_size(dpi::LogicalSize::new(WIDTH, HEIGHT));
-    let cb = ContextBuilder::new();
+    let cb = ContextBuilder::new().with_depth_buffer(24);
     let display = Display::new(wb, cb, &event_loop).unwrap();
     unsafe {
         world_renderer::set_display(&display);
@@ -216,7 +216,7 @@ fn main() {
                 let primitives = my_ui.draw();
                 renderer.fill(display, primitives, &image_map);
                 let mut target = display.draw();
-                target.clear_color(0.0, 0.0, 0.0, 1.0);
+                target.clear_color_and_depth((0.0, 0.0, 0.0, 1.0), 1.0);
 
                 {
                     let worlds = world::WORLDS.read().unwrap();

@@ -54,8 +54,8 @@ unsafe impl Sync for WorldRenderer {}
 
 impl WorldRenderer {
     pub fn new(_mc_version: &str, resources: &Resources) -> WorldRenderer {
-        let atlas_image = glium::texture::RawImage2d::from_raw_rgba_reversed(
-            &resources.block_atlas.data,
+        let atlas_image = glium::texture::RawImage2d::from_raw_rgba(
+            resources.block_atlas.data.clone(),
             (resources.block_atlas.width, resources.block_atlas.height),
         );
         WorldRenderer {
@@ -82,12 +82,12 @@ impl WorldRenderer {
         let camera_pos = world::Pos::<f32>::from(world.camera.pos).to_glam();
         let camera_yaw = world.camera.yaw.to_radians();
         let camera_pitch = world.camera.pitch.to_radians();
-        let view_matrix = Mat4::from_rotation_translation(Quat::from_euler(EulerRot::XYZ, camera_pitch, camera_yaw, 0.0), camera_pos);
+        let view_matrix = Mat4::from_rotation_translation(Quat::from_euler(EulerRot::XYZ, camera_pitch, camera_yaw, 0.0), camera_pos).inverse();
 
         let uniforms = uniform! {
                     projection_matrix: projection.to_cols_array_2d(),
                     view_matrix: view_matrix.to_cols_array_2d(),
-                    tex: &self.block_atlas_texture,
+                    tex: self.block_atlas_texture.sampled().magnify_filter(glium::uniforms::MagnifySamplerFilter::Nearest),
                     ambient_light: 0.1f32,
                     sky_brightness: 0.0f32,
                     sky_darkness: 0.0f32,
@@ -96,7 +96,16 @@ impl WorldRenderer {
                 };
         let vertex_buffer = glium::VertexBuffer::new(get_display(), &geometry.vertices).unwrap();
         let index_buffer = glium::IndexBuffer::new(get_display(), glium::index::PrimitiveType::TrianglesList, &geometry.indices).unwrap();
-        target.draw(&vertex_buffer, &index_buffer, &self.shader_program, &uniforms, &Default::default()).unwrap();
+        let params = glium::DrawParameters {
+            depth: glium::Depth {
+                test: glium::DepthTest::IfLess,
+                write: true,
+                ..Default::default()
+            },
+            backface_culling: glium::draw_parameters::BackfaceCullingMode::CullClockwise,
+            ..Default::default()
+        };
+        target.draw(&vertex_buffer, &index_buffer, &self.shader_program, &uniforms, &params).unwrap();
     }
 
     fn render_state(&self, world: &World, state: &IBlockState, pos: BlockPos, out_geometry: &mut Geometry) {
@@ -146,22 +155,24 @@ impl WorldRenderer {
             sprite.v2 as f32 / atlas.height as f32
         );
         let vertices = vec![
+            // -Z
             BakedModelVertex {
                 position: [0.0, 0.0, 0.0],
                 tex_coords: [u1, v1],
             },
             BakedModelVertex {
-                position: [16.0, 0.0, 0.0],
-                tex_coords: [u2, v1],
+                position: [0.0, 16.0, 0.0],
+                tex_coords: [u1, v2],
             },
             BakedModelVertex {
                 position: [16.0, 16.0, 0.0],
                 tex_coords: [u2, v2],
             },
             BakedModelVertex {
-                position: [0.0, 16.0, 0.0],
-                tex_coords: [u1, v2],
+                position: [16.0, 0.0, 0.0],
+                tex_coords: [u2, v1],
             },
+            // +Z
             BakedModelVertex {
                 position: [0.0, 0.0, 16.0],
                 tex_coords: [u1, v1],
@@ -178,38 +189,41 @@ impl WorldRenderer {
                 position: [0.0, 16.0, 16.0],
                 tex_coords: [u1, v2],
             },
+            // -X
             BakedModelVertex {
                 position: [16.0, 0.0, 0.0],
                 tex_coords: [u1, v1],
-            },
-            BakedModelVertex {
-                position: [16.0, 0.0, 16.0],
-                tex_coords: [u2, v1],
-            },
-            BakedModelVertex {
-                position: [16.0, 16.0, 16.0],
-                tex_coords: [u2, v2],
             },
             BakedModelVertex {
                 position: [16.0, 16.0, 0.0],
                 tex_coords: [u1, v2],
             },
             BakedModelVertex {
+                position: [16.0, 16.0, 16.0],
+                tex_coords: [u2, v2],
+            },
+            BakedModelVertex {
+                position: [16.0, 0.0, 16.0],
+                tex_coords: [u2, v1],
+            },
+            // +X
+            BakedModelVertex {
                 position: [0.0, 0.0, 16.0],
                 tex_coords: [u1, v1],
             },
             BakedModelVertex {
-                position: [0.0, 0.0, 0.0],
-                tex_coords: [u2, v1],
+                position: [0.0, 16.0, 16.0],
+                tex_coords: [u1, v2],
             },
             BakedModelVertex {
                 position: [0.0, 16.0, 0.0],
                 tex_coords: [u2, v2],
             },
             BakedModelVertex {
-                position: [0.0, 16.0, 16.0],
-                tex_coords: [u1, v2],
+                position: [0.0, 0.0, 0.0],
+                tex_coords: [u2, v1],
             },
+            // -Y
             BakedModelVertex {
                 position: [0.0, 0.0, 0.0],
                 tex_coords: [u1, v1],
@@ -226,21 +240,22 @@ impl WorldRenderer {
                 position: [0.0, 0.0, 16.0],
                 tex_coords: [u1, v2],
             },
+            // +Y
             BakedModelVertex {
                 position: [0.0, 16.0, 16.0],
                 tex_coords: [u1, v1],
             },
             BakedModelVertex {
-                position: [0.0, 16.0, 0.0],
-                tex_coords: [u2, v1],
+                position: [16.0, 16.0, 16.0],
+                tex_coords: [u1, v2],
             },
             BakedModelVertex {
                 position: [16.0, 16.0, 0.0],
                 tex_coords: [u2, v2],
             },
             BakedModelVertex {
-                position: [16.0, 16.0, 16.0],
-                tex_coords: [u1, v2],
+                position: [0.0, 16.0, 0.0],
+                tex_coords: [u2, v1],
             },
         ];
         let indices = vec![

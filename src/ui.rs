@@ -1,8 +1,9 @@
-use conrod_core::{event, input, Labelable, Positionable, Sizeable, widget, Widget, widget_ids};
+use conrod_core::{Colorable, event, input, Labelable, Positionable, Sizeable, widget, Widget, widget_ids};
 use crate::{CommonFNames, minecraft, world};
 
 widget_ids!(pub struct Ids {
-    open_button
+    debug,
+    open_button,
 });
 
 pub struct UiState {
@@ -29,6 +30,21 @@ pub fn init_ui(ui: &mut conrod_core::Ui) -> UiState {
 }
 
 pub fn set_ui(state: &UiState, ui: &mut conrod_core::UiCell) {
+    let (x, y, z, yaw, pitch) = {
+        let worlds = world::WORLDS.read().unwrap();
+        match worlds.last() {
+            Some(world) => {
+                let camera = &world.unwrap().camera;
+                (camera.pos.x, camera.pos.y, camera.pos.z, camera.yaw, camera.pitch)
+            }
+            None => (0.0, 0.0, 0.0, 0.0, 0.0),
+        }
+    };
+    widget::Text::new(format!("Pos: {:.2}, {:.2}, {:.2}, yaw: {:.2}, pitch: {:.2}", x, y, z, yaw, pitch).as_str())
+        .mid_left_of(ui.window)
+        .color(conrod_core::color::WHITE)
+        .set(state.ids.debug, ui);
+
     if widget::Button::new()
         .label("Open")
         .top_left_of(ui.window)
