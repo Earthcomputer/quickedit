@@ -1,6 +1,7 @@
 use std::{fmt, fs, io};
 use std::cell::RefCell;
 use std::io::Read;
+use std::iter::FilterMap;
 use std::ops::Deref;
 use std::path::{Path, PathBuf};
 use ahash::{AHashMap, AHashSet};
@@ -629,9 +630,9 @@ impl<'de> Deserialize<'de> for MultipartWhen {
 }
 
 pub struct BlockModel {
-    ambient_occlusion: bool,
-    textures: AHashMap<String, FName>,
-    elements: Vec<ModelElement>,
+    pub ambient_occlusion: bool,
+    pub textures: AHashMap<String, FName>,
+    pub elements: Vec<ModelElement>,
 }
 
 #[derive(Deserialize)]
@@ -653,25 +654,25 @@ pub enum TextureVariable {
 #[derive(Clone, Deserialize)]
 pub struct ModelElement {
     #[serde(deserialize_with = "deserialize_float_coord")]
-    from: world::Pos<f32>,
+    pub from: world::Pos<f32>,
     #[serde(deserialize_with = "deserialize_float_coord")]
-    to: world::Pos<f32>,
+    pub to: world::Pos<f32>,
     #[serde(default)]
-    rotation: ElementRotation,
+    pub rotation: ElementRotation,
     #[serde(default = "default_true")]
-    shade: bool,
+    pub shade: bool,
     #[serde(default)]
-    faces: ElementFaces,
+    pub faces: ElementFaces,
 }
 
 #[derive(Clone, Deserialize)]
 pub struct ElementRotation {
     #[serde(deserialize_with = "deserialize_float_coord")]
-    origin: world::Pos<f32>,
-    axis: world::Axis,
-    angle: f32,
+    pub origin: world::Pos<f32>,
+    pub axis: world::Axis,
+    pub angle: f32,
     #[serde(default)]
-    rescale: bool,
+    pub rescale: bool,
 }
 
 #[derive(Clone, Default, Deserialize)]
@@ -684,16 +685,32 @@ pub struct ElementFaces {
     east: Option<ElementFace>,
 }
 
+impl<'a> IntoIterator for &'a ElementFaces {
+    type Item = (world::Direction, &'a ElementFace);
+    type IntoIter = FilterMap<<Vec<(world::Direction, &'a Option<ElementFace>)> as IntoIterator>::IntoIter, fn((world::Direction, &'a Option<ElementFace>)) -> Option<(world::Direction, &'a ElementFace)>>;
+
+    fn into_iter(self) -> Self::IntoIter {
+        vec![
+            (world::Direction::Up, &self.up),
+            (world::Direction::Down, &self.down),
+            (world::Direction::North, &self.north),
+            (world::Direction::South, &self.south),
+            (world::Direction::West, &self.west),
+            (world::Direction::East, &self.east),
+        ].into_iter().filter_map(|(dir, face)| face.as_ref().map(|face| (dir, face)))
+    }
+}
+
 #[derive(Clone, Deserialize)]
 pub struct ElementFace {
-    uv: Option<Uv>,
-    texture: String,
+    pub uv: Option<Uv>,
+    pub texture: String,
     #[serde(default, deserialize_with = "deserialize_cullface")]
-    cullface: Option<world::Direction>,
+    pub cullface: Option<world::Direction>,
     #[serde(default)]
-    rotation: u16,
+    pub rotation: u16,
     #[serde(rename = "tintindex", default = "default_tint_index")]
-    tint_index: i32,
+    pub tint_index: i32,
 }
 
 fn default_tint_index() -> i32 {

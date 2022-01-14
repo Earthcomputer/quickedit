@@ -266,3 +266,18 @@ where
         func(item, &mut *wrapper.0);
     });
 }
+
+pub trait Lerp {
+    type Output;
+    fn lerp(self, other: Self, t: Self) -> Self::Output;
+}
+
+impl<T> Lerp for T
+where
+    T: std::ops::Add<Output=T> + std::ops::Sub<Output=T> + std::ops::Mul<Output=T> + Copy
+{
+    type Output = T;
+    fn lerp(self, other: Self, t: Self) -> T {
+        (other - self) * t + self
+    }
+}

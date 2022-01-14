@@ -1,8 +1,9 @@
-use glam::{EulerRot, Mat4, Quat};
+use glam::{EulerRot, Mat4, Quat, Vec3, Vec4};
 use glium::{Surface, uniform};
-use crate::{CommonFNames, util, world};
+use num_traits::FloatConst;
+use crate::{CommonFNames, fname, util, world};
 use crate::resources::{Resources, TextureAtlas};
-use crate::util::{FastDashMap, make_fast_dash_map};
+use crate::util::{FastDashMap, Lerp, make_fast_dash_map};
 use crate::world::{BlockPos, BlockState, IBlockState, World};
 
 const MAIN_VERT_SHADER: &str = include_str!("../res/main.vsh");
@@ -71,7 +72,7 @@ impl WorldRenderer {
 
     pub fn render_world(&self, world: &World, target: &mut glium::Frame) {
         let mut geometry = Geometry::default();
-        self.render_state(world, &IBlockState::new(BlockState::new(&CommonFNames.STONE)), BlockPos::new(0, 0, 0), &mut geometry);
+        self.render_state(world, &IBlockState::new(BlockState::new(&fname::from_str("brewing_stand"))), BlockPos::new(0, 0, 0), &mut geometry);
 
         let fov = 70.0f32;
         let aspect_ratio = target.get_dimensions().0 as f32 / target.get_dimensions().1 as f32;
@@ -139,11 +140,125 @@ impl WorldRenderer {
 
     fn bake_model(&self, world: &World, state: &IBlockState) -> BakedModel {
         let atlas = &world.resources.block_atlas;
-        let _models = match world.resources.get_block_model(state) {
+        let models = match world.resources.get_block_model(state) {
             Some(models) => models,
             None => return WorldRenderer::bake_missingno(atlas)
         };
-        WorldRenderer::bake_missingno(atlas)
+
+        let mut baked_model = BakedModel {
+            ambient_occlusion: true,
+            ..Default::default()
+        };
+
+        for model in models {
+            let model_transform = Mat4::from_translation(Vec3::new(0.5, 0.5, 0.5))
+                * match model.x_rotation.rem_euclid(360) {
+                    90 => Mat4::from_cols(Vec4::X, Vec4::Z, -Vec4::Y, Vec4::ZERO),
+                    180 => Mat4::from_cols(Vec4::X, -Vec4::Y, -Vec4::Z, Vec4::ZERO),
+                    270 => Mat4::from_cols(Vec4::X, -Vec4::Z, Vec4::Y, Vec4::ZERO),
+                    _ => Mat4::IDENTITY,
+                }
+                * match model.y_rotation.rem_euclid(360) {
+                    90 => Mat4::from_cols(Vec4::Z, Vec4::Y, -Vec4::X, Vec4::ZERO),
+                    180 => Mat4::from_cols(-Vec4::X, Vec4::Y, -Vec4::Z, Vec4::ZERO),
+                    270 => Mat4::from_cols(-Vec4::Z, Vec4::Y, Vec4::X, Vec4::ZERO),
+                    _ => Mat4::IDENTITY,
+                }
+                * Mat4::from_translation(Vec3::new(-0.5, -0.5, -0.5))
+                * (Mat4::IDENTITY.mul_scalar(0.0625));
+
+            let _uvlock = model.uvlock; // TODO: uvlock
+            let model = model.model;
+            baked_model.ambient_occlusion = baked_model.ambient_occlusion && model.ambient_occlusion;
+            for element in &model.elements {
+                let mut element_transform = match element.rotation.axis {
+                    world::Axis::X => Mat4::from_rotation_x(element.rotation.angle.to_radians()),
+                    world::Axis::Y => Mat4::from_rotation_y(element.rotation.angle.to_radians()),
+                    world::Axis::Z => Mat4::from_rotation_z(element.rotation.angle.to_radians()),
+                };
+                if element.rotation.rescale {
+                    let scale = if element.rotation.angle.abs() == 22.5 {
+                        f32::FRAC_PI_8().cos().recip() - 1.0
+                    } else {
+                        f32::FRAC_PI_4().cos().recip() - 1.0
+                    };
+                    element_transform *= Mat4::from_scale(Vec3::new(scale, scale, scale));
+                }
+                element_transform = Mat4::from_translation(element.rotation.origin.to_glam())
+                    * element_transform
+                    * Mat4::from_translation(-element.rotation.origin.to_glam());
+                element_transform = model_transform * element_transform;
+
+                for (dir, face) in &element.faces {
+                    // TODO: face.rotation, .cullface
+                    let (u1, v1, u2, v2) = if let Some(uv) = &face.uv {
+                        (uv.u1, uv.v1, uv.u2, uv.v2)
+                    } else {
+                        match dir {
+                            world::Direction::PosX => (16.0 - element.to.z, 16.0 - element.to.y, 16.0 - element.from.z, 16.0 - element.from.y),
+                            world::Direction::NegX => (element.from.z, 16.0 - element.to.y, element.to.z, 16.0 - element.from.y),
+                            world::Direction::PosY => (element.from.x, element.from.z, element.to.x, element.to.z),
+                            world::Direction::NegY => (element.from.x, 16.0 - element.to.z, element.to.x, 16.0 - element.from.z),
+                            world::Direction::PosZ => (element.from.x, 16.0 - element.to.y, element.to.x, 16.0 - element.from.y),
+                            world::Direction::NegZ => (16.0 - element.to.x, 16.0 - element.to.y, 16.0 - element.from.x, 16.0 - element.from.y),
+                        }
+                    };
+                    let sprite = match face.texture.strip_prefix('#')
+                        .and_then(|texture| model.textures.get(texture))
+                        .and_then(|texture| atlas.get_sprite(texture))
+                    {
+                        Some(sprite) => sprite,
+                        None => return WorldRenderer::bake_missingno(atlas)
+                    };
+                    let (u1, v1, u2, v2) = ((sprite.u1 as f32).lerp(sprite.u2 as f32, u1 / 16.0), (sprite.v1 as f32).lerp(sprite.v2 as f32, v1 / 16.0), (sprite.u1 as f32).lerp(sprite.u2 as f32, u2 / 16.0), (sprite.v1 as f32).lerp(sprite.v2 as f32, v2 / 16.0));
+                    let (u1, v1, u2, v2) = (u1 / atlas.width as f32, v1 / atlas.height as f32, u2 / atlas.width as f32, v2 / atlas.height as f32);
+                    let index = baked_model.vertices.len() as u16;
+                    let (vert1, vert2, vert3, vert4) = match dir {
+                        world::Direction::PosX =>
+                            (Vec3::new(element.to.x, element.from.y, element.to.z), Vec3::new(element.to.x, element.from.y, element.from.z),
+                             Vec3::new(element.to.x, element.to.y, element.from.z), Vec3::new(element.to.x, element.to.y, element.to.z)),
+                        world::Direction::NegX =>
+                            (Vec3::new(element.from.x, element.from.y, element.from.z), Vec3::new(element.from.x, element.from.y, element.to.z),
+                             Vec3::new(element.from.x, element.to.y, element.to.z), Vec3::new(element.from.x, element.to.y, element.from.z)),
+                        world::Direction::PosY =>
+                            (Vec3::new(element.from.x, element.to.y, element.to.z), Vec3::new(element.to.x, element.to.y, element.to.z),
+                             Vec3::new(element.to.x, element.to.y, element.from.z), Vec3::new(element.from.x, element.to.y, element.from.z)),
+                        world::Direction::NegY =>
+                            (Vec3::new(element.from.x, element.from.y, element.from.z), Vec3::new(element.to.x, element.from.y, element.from.z),
+                             Vec3::new(element.to.x, element.from.y, element.to.z), Vec3::new(element.from.x, element.from.y, element.to.z)),
+                        world::Direction::PosZ =>
+                            (Vec3::new(element.from.x, element.from.y, element.to.z), Vec3::new(element.to.x, element.from.y, element.to.z),
+                             Vec3::new(element.to.x, element.to.y, element.to.z), Vec3::new(element.from.x, element.to.y, element.to.z)),
+                        world::Direction::NegZ =>
+                            (Vec3::new(element.to.x, element.from.y, element.from.z), Vec3::new(element.from.x, element.from.y, element.from.z),
+                             Vec3::new(element.from.x, element.to.y, element.from.z), Vec3::new(element.to.x, element.to.y, element.from.z)),
+                    };
+                    baked_model.vertices.push(BakedModelVertex {
+                        position: element_transform.transform_point3(vert1).to_array(),
+                        tex_coords: [u1, v2]
+                    });
+                    baked_model.vertices.push(BakedModelVertex {
+                        position: element_transform.transform_point3(vert2).to_array(),
+                        tex_coords: [u2, v2]
+                    });
+                    baked_model.vertices.push(BakedModelVertex {
+                        position: element_transform.transform_point3(vert3).to_array(),
+                        tex_coords: [u2, v1]
+                    });
+                    baked_model.vertices.push(BakedModelVertex {
+                        position: element_transform.transform_point3(vert4).to_array(),
+                        tex_coords: [u1, v1]
+                    });
+                    baked_model.indices.push(index);
+                    baked_model.indices.push(index + 1);
+                    baked_model.indices.push(index + 2);
+                    baked_model.indices.push(index + 2);
+                    baked_model.indices.push(index + 3);
+                    baked_model.indices.push(index);
+                }
+            }
+        }
+        baked_model
     }
 
     fn bake_missingno(atlas: &TextureAtlas) -> BakedModel {
@@ -161,62 +276,62 @@ impl WorldRenderer {
                 tex_coords: [u1, v1],
             },
             BakedModelVertex {
-                position: [0.0, 16.0, 0.0],
+                position: [0.0, 1.0, 0.0],
                 tex_coords: [u1, v2],
             },
             BakedModelVertex {
-                position: [16.0, 16.0, 0.0],
+                position: [1.0, 1.0, 0.0],
                 tex_coords: [u2, v2],
             },
             BakedModelVertex {
-                position: [16.0, 0.0, 0.0],
+                position: [1.0, 0.0, 0.0],
                 tex_coords: [u2, v1],
             },
             // +Z
             BakedModelVertex {
-                position: [0.0, 0.0, 16.0],
+                position: [0.0, 0.0, 1.0],
                 tex_coords: [u1, v1],
             },
             BakedModelVertex {
-                position: [16.0, 0.0, 16.0],
+                position: [1.0, 0.0, 1.0],
                 tex_coords: [u2, v1],
             },
             BakedModelVertex {
-                position: [16.0, 16.0, 16.0],
+                position: [1.0, 1.0, 1.0],
                 tex_coords: [u2, v2],
             },
             BakedModelVertex {
-                position: [0.0, 16.0, 16.0],
+                position: [0.0, 1.0, 1.0],
                 tex_coords: [u1, v2],
             },
             // -X
             BakedModelVertex {
-                position: [16.0, 0.0, 0.0],
+                position: [1.0, 0.0, 0.0],
                 tex_coords: [u1, v1],
             },
             BakedModelVertex {
-                position: [16.0, 16.0, 0.0],
+                position: [1.0, 1.0, 0.0],
                 tex_coords: [u1, v2],
             },
             BakedModelVertex {
-                position: [16.0, 16.0, 16.0],
+                position: [1.0, 1.0, 1.0],
                 tex_coords: [u2, v2],
             },
             BakedModelVertex {
-                position: [16.0, 0.0, 16.0],
+                position: [1.0, 0.0, 1.0],
                 tex_coords: [u2, v1],
             },
             // +X
             BakedModelVertex {
-                position: [0.0, 0.0, 16.0],
+                position: [0.0, 0.0, 1.0],
                 tex_coords: [u1, v1],
             },
             BakedModelVertex {
-                position: [0.0, 16.0, 16.0],
+                position: [0.0, 1.0, 1.0],
                 tex_coords: [u1, v2],
             },
             BakedModelVertex {
-                position: [0.0, 16.0, 0.0],
+                position: [0.0, 1.0, 0.0],
                 tex_coords: [u2, v2],
             },
             BakedModelVertex {
@@ -229,32 +344,32 @@ impl WorldRenderer {
                 tex_coords: [u1, v1],
             },
             BakedModelVertex {
-                position: [16.0, 0.0, 0.0],
+                position: [1.0, 0.0, 0.0],
                 tex_coords: [u2, v1],
             },
             BakedModelVertex {
-                position: [16.0, 0.0, 16.0],
+                position: [1.0, 0.0, 1.0],
                 tex_coords: [u2, v2],
             },
             BakedModelVertex {
-                position: [0.0, 0.0, 16.0],
+                position: [0.0, 0.0, 1.0],
                 tex_coords: [u1, v2],
             },
             // +Y
             BakedModelVertex {
-                position: [0.0, 16.0, 16.0],
+                position: [0.0, 1.0, 1.0],
                 tex_coords: [u1, v1],
             },
             BakedModelVertex {
-                position: [16.0, 16.0, 16.0],
+                position: [1.0, 1.0, 1.0],
                 tex_coords: [u1, v2],
             },
             BakedModelVertex {
-                position: [16.0, 16.0, 0.0],
+                position: [1.0, 1.0, 0.0],
                 tex_coords: [u2, v2],
             },
             BakedModelVertex {
-                position: [0.0, 16.0, 0.0],
+                position: [0.0, 1.0, 0.0],
                 tex_coords: [u2, v1],
             },
         ];
@@ -272,13 +387,15 @@ impl WorldRenderer {
             20, 21, 22,
             22, 23, 20,
         ];
-        return BakedModel { vertices, indices }
+        return BakedModel { vertices, indices, ambient_occlusion: false }
     }
 }
 
+#[derive(Default)]
 struct BakedModel {
     vertices: Vec<BakedModelVertex>,
     indices: Vec<u16>,
+    ambient_occlusion: bool,
 }
 
 struct BakedModelVertex {

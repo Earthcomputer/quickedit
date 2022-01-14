@@ -120,6 +120,70 @@ pub enum Direction {
     Down,
 }
 
+#[allow(non_upper_case_globals)]
+impl Direction {
+    pub const NegX: Direction = Direction::West;
+    pub const NegY: Direction = Direction::Down;
+    pub const NegZ: Direction = Direction::North;
+    pub const PosX: Direction = Direction::East;
+    pub const PosY: Direction = Direction::Up;
+    pub const PosZ: Direction = Direction::South;
+
+    pub const ALL: [Direction; 6] = [
+        Direction::North,
+        Direction::South,
+        Direction::East,
+        Direction::West,
+        Direction::Up,
+        Direction::Down,
+    ];
+
+    pub const HORIZONTAL: [Direction; 4] = [
+        Direction::North,
+        Direction::South,
+        Direction::East,
+        Direction::West,
+    ];
+
+    pub const VERTICAL: [Direction; 2] = [
+        Direction::Up,
+        Direction::Down,
+    ];
+
+    pub fn axis(self) -> Axis {
+        match self {
+            Direction::North => Axis::Z,
+            Direction::South => Axis::Z,
+            Direction::East => Axis::X,
+            Direction::West => Axis::X,
+            Direction::Up => Axis::Y,
+            Direction::Down => Axis::Y,
+        }
+    }
+
+    pub fn opposite(self) -> Self {
+        match self {
+            Direction::North => Direction::South,
+            Direction::South => Direction::North,
+            Direction::East => Direction::West,
+            Direction::West => Direction::East,
+            Direction::Up => Direction::Down,
+            Direction::Down => Direction::Up,
+        }
+    }
+
+    pub fn forward(self) -> BlockPos {
+        match self {
+            Direction::North => BlockPos::new(0, 0, -1),
+            Direction::South => BlockPos::new(0, 0, 1),
+            Direction::East => BlockPos::new(1, 0, 0),
+            Direction::West => BlockPos::new(-1, 0, 0),
+            Direction::Up => BlockPos::new(0, 1, 0),
+            Direction::Down => BlockPos::new(0, -1, 0),
+        }
+    }
+}
+
 #[derive(Debug, Clone, PartialEq, Eq)]
 pub struct BlockState {
     pub block: FName,
