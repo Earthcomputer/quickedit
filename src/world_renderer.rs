@@ -1,7 +1,8 @@
+use ahash::AHashMap;
 use glam::{EulerRot, Mat4, Quat, Vec3, Vec4};
 use glium::{Surface, uniform};
 use num_traits::FloatConst;
-use crate::{CommonFNames, fname, util, world};
+use crate::{CommonFNames, fname, make_a_hash_map, util, world};
 use crate::resources::{Resources, TextureAtlas};
 use crate::util::{FastDashMap, Lerp, make_fast_dash_map};
 use crate::world::{BlockPos, BlockState, IBlockState, World};
@@ -112,20 +113,22 @@ impl WorldRenderer {
 
     fn render_state(&self, world: &World, state: &IBlockState, pos: BlockPos, out_geometry: &mut Geometry) {
         let baked_model = self.get_baked_model(world, state);
-        let index = out_geometry.vertices.len() as u32;
-        for vertex in &baked_model.vertices {
-            out_geometry.vertices.push(util::Vertex {
-                position: [
-                    vertex.position[0] + pos.x as f32,
-                    vertex.position[1] + pos.y as f32,
-                    vertex.position[2] + pos.z as f32,
-                ],
-                tex_coords: vertex.tex_coords,
-                lightmap_coords: [1.0, 0.0],
-            });
-        }
-        for i in &baked_model.indices {
-            out_geometry.indices.push(index + *i as u32);
+        for (_dir, face) in &baked_model.faces {
+            let index = out_geometry.vertices.len() as u32;
+            for vertex in &face.vertices {
+                out_geometry.vertices.push(util::Vertex {
+                    position: [
+                        vertex.position[0] + pos.x as f32,
+                        vertex.position[1] + pos.y as f32,
+                        vertex.position[2] + pos.z as f32,
+                    ],
+                    tex_coords: vertex.tex_coords,
+                    lightmap_coords: [1.0, 0.0],
+                });
+            }
+            for i in &face.indices {
+                out_geometry.indices.push(index + *i as u32);
+            }
         }
     }
 
@@ -191,7 +194,7 @@ impl WorldRenderer {
                 element_transform = model_transform * element_transform;
 
                 for (dir, face) in &element.faces {
-                    // TODO: face.rotation, .cullface
+                    // TODO: face.rotation
                     let (u1, v1, u2, v2) = if let Some(uv) = &face.uv {
                         (uv.u1, uv.v1, uv.u2, uv.v2)
                     } else {
@@ -242,7 +245,10 @@ impl WorldRenderer {
                     };
                     let (u1, v1, u2, v2) = ((sprite.u1 as f32).lerp(sprite.u2 as f32, u1), (sprite.v1 as f32).lerp(sprite.v2 as f32, v1), (sprite.u1 as f32).lerp(sprite.u2 as f32, u2), (sprite.v1 as f32).lerp(sprite.v2 as f32, v2));
                     let (u1, v1, u2, v2) = (u1 / atlas.width as f32, v1 / atlas.height as f32, u2 / atlas.width as f32, v2 / atlas.height as f32);
-                    let index = baked_model.vertices.len() as u16;
+                    let dest_face = baked_model.faces
+                        .entry(face.cullface.map(|cullface| cullface.transform(&model_transform)))
+                        .or_insert_with(BakedModelFace::default);
+                    let index = dest_face.vertices.len() as u16;
                     let (vert1, vert2, vert3, vert4) = match dir {
                         world::Direction::PosX =>
                             (Vec3::new(element.to.x, element.from.y, element.to.z), Vec3::new(element.to.x, element.from.y, element.from.z),
@@ -263,28 +269,28 @@ impl WorldRenderer {
                             (Vec3::new(element.to.x, element.from.y, element.from.z), Vec3::new(element.from.x, element.from.y, element.from.z),
                              Vec3::new(element.from.x, element.to.y, element.from.z), Vec3::new(element.to.x, element.to.y, element.from.z)),
                     };
-                    baked_model.vertices.push(BakedModelVertex {
+                    dest_face.vertices.push(BakedModelVertex {
                         position: element_transform.transform_point3(vert1).to_array(),
                         tex_coords: [u1, v2]
                     });
-                    baked_model.vertices.push(BakedModelVertex {
+                    dest_face.vertices.push(BakedModelVertex {
                         position: element_transform.transform_point3(vert2).to_array(),
                         tex_coords: [u2, v2]
                     });
-                    baked_model.vertices.push(BakedModelVertex {
+                    dest_face.vertices.push(BakedModelVertex {
                         position: element_transform.transform_point3(vert3).to_array(),
                         tex_coords: [u2, v1]
                     });
-                    baked_model.vertices.push(BakedModelVertex {
+                    dest_face.vertices.push(BakedModelVertex {
                         position: element_transform.transform_point3(vert4).to_array(),
                         tex_coords: [u1, v1]
                     });
-                    baked_model.indices.push(index);
-                    baked_model.indices.push(index + 1);
-                    baked_model.indices.push(index + 2);
-                    baked_model.indices.push(index + 2);
-                    baked_model.indices.push(index + 3);
-                    baked_model.indices.push(index);
+                    dest_face.indices.push(index);
+                    dest_face.indices.push(index + 1);
+                    dest_face.indices.push(index + 2);
+                    dest_face.indices.push(index + 2);
+                    dest_face.indices.push(index + 3);
+                    dest_face.indices.push(index);
                 }
             }
         }
@@ -299,135 +305,151 @@ impl WorldRenderer {
             sprite.u2 as f32 / atlas.width as f32,
             sprite.v2 as f32 / atlas.height as f32
         );
-        let vertices = vec![
-            // -Z
-            BakedModelVertex {
-                position: [0.0, 0.0, 0.0],
-                tex_coords: [u1, v1],
+        let faces = make_a_hash_map!(
+            Some(world::Direction::NegZ) => BakedModelFace {
+                vertices: vec![
+                    BakedModelVertex {
+                        position: [0.0, 0.0, 0.0],
+                        tex_coords: [u1, v1],
+                    },
+                    BakedModelVertex {
+                        position: [0.0, 1.0, 0.0],
+                        tex_coords: [u1, v2],
+                    },
+                    BakedModelVertex {
+                        position: [1.0, 1.0, 0.0],
+                        tex_coords: [u2, v2],
+                    },
+                    BakedModelVertex {
+                        position: [1.0, 0.0, 0.0],
+                        tex_coords: [u2, v1],
+                    },
+                ],
+                indices: vec![0, 1, 2, 2, 3, 0],
             },
-            BakedModelVertex {
-                position: [0.0, 1.0, 0.0],
-                tex_coords: [u1, v2],
+            Some(world::Direction::PosZ) => BakedModelFace {
+                vertices: vec![
+                    BakedModelVertex {
+                        position: [0.0, 0.0, 1.0],
+                        tex_coords: [u1, v1],
+                    },
+                    BakedModelVertex {
+                        position: [1.0, 0.0, 1.0],
+                        tex_coords: [u2, v1],
+                    },
+                    BakedModelVertex {
+                        position: [1.0, 1.0, 1.0],
+                        tex_coords: [u2, v2],
+                    },
+                    BakedModelVertex {
+                        position: [0.0, 1.0, 1.0],
+                        tex_coords: [u1, v2],
+                    },
+                ],
+                indices: vec![0, 1, 2, 2, 3, 0],
             },
-            BakedModelVertex {
-                position: [1.0, 1.0, 0.0],
-                tex_coords: [u2, v2],
+            Some(world::Direction::NegX) => BakedModelFace {
+                vertices: vec![
+                    BakedModelVertex {
+                        position: [1.0, 0.0, 0.0],
+                        tex_coords: [u1, v1],
+                    },
+                    BakedModelVertex {
+                        position: [1.0, 1.0, 0.0],
+                        tex_coords: [u1, v2],
+                    },
+                    BakedModelVertex {
+                        position: [1.0, 1.0, 1.0],
+                        tex_coords: [u2, v2],
+                    },
+                    BakedModelVertex {
+                        position: [1.0, 0.0, 1.0],
+                        tex_coords: [u2, v1],
+                    },
+                ],
+                indices: vec![0, 1, 2, 2, 3, 0],
             },
-            BakedModelVertex {
-                position: [1.0, 0.0, 0.0],
-                tex_coords: [u2, v1],
+            Some(world::Direction::PosX) => BakedModelFace {
+                vertices: vec![
+                    BakedModelVertex {
+                        position: [0.0, 0.0, 1.0],
+                        tex_coords: [u1, v1],
+                    },
+                    BakedModelVertex {
+                        position: [0.0, 1.0, 1.0],
+                        tex_coords: [u1, v2],
+                    },
+                    BakedModelVertex {
+                        position: [0.0, 1.0, 0.0],
+                        tex_coords: [u2, v2],
+                    },
+                    BakedModelVertex {
+                        position: [0.0, 0.0, 0.0],
+                        tex_coords: [u2, v1],
+                    },
+                ],
+                indices: vec![0, 1, 2, 2, 3, 0],
             },
-            // +Z
-            BakedModelVertex {
-                position: [0.0, 0.0, 1.0],
-                tex_coords: [u1, v1],
+            Some(world::Direction::NegY) => BakedModelFace {
+                vertices: vec![
+                    BakedModelVertex {
+                        position: [0.0, 0.0, 0.0],
+                        tex_coords: [u1, v1],
+                    },
+                    BakedModelVertex {
+                        position: [1.0, 0.0, 0.0],
+                        tex_coords: [u2, v1],
+                    },
+                    BakedModelVertex {
+                        position: [1.0, 0.0, 1.0],
+                        tex_coords: [u2, v2],
+                    },
+                    BakedModelVertex {
+                        position: [0.0, 0.0, 1.0],
+                        tex_coords: [u1, v2],
+                    },
+                ],
+                indices: vec![0, 1, 2, 2, 3, 0],
             },
-            BakedModelVertex {
-                position: [1.0, 0.0, 1.0],
-                tex_coords: [u2, v1],
+            Some(world::Direction::PosY) => BakedModelFace {
+                vertices: vec![
+                    BakedModelVertex {
+                        position: [0.0, 1.0, 1.0],
+                        tex_coords: [u1, v1],
+                    },
+                    BakedModelVertex {
+                        position: [1.0, 1.0, 1.0],
+                        tex_coords: [u1, v2],
+                    },
+                    BakedModelVertex {
+                        position: [1.0, 1.0, 0.0],
+                        tex_coords: [u2, v2],
+                    },
+                    BakedModelVertex {
+                        position: [0.0, 1.0, 0.0],
+                        tex_coords: [u2, v1],
+                    },
+                ],
+                indices: vec![0, 1, 2, 2, 3, 0],
             },
-            BakedModelVertex {
-                position: [1.0, 1.0, 1.0],
-                tex_coords: [u2, v2],
-            },
-            BakedModelVertex {
-                position: [0.0, 1.0, 1.0],
-                tex_coords: [u1, v2],
-            },
-            // -X
-            BakedModelVertex {
-                position: [1.0, 0.0, 0.0],
-                tex_coords: [u1, v1],
-            },
-            BakedModelVertex {
-                position: [1.0, 1.0, 0.0],
-                tex_coords: [u1, v2],
-            },
-            BakedModelVertex {
-                position: [1.0, 1.0, 1.0],
-                tex_coords: [u2, v2],
-            },
-            BakedModelVertex {
-                position: [1.0, 0.0, 1.0],
-                tex_coords: [u2, v1],
-            },
-            // +X
-            BakedModelVertex {
-                position: [0.0, 0.0, 1.0],
-                tex_coords: [u1, v1],
-            },
-            BakedModelVertex {
-                position: [0.0, 1.0, 1.0],
-                tex_coords: [u1, v2],
-            },
-            BakedModelVertex {
-                position: [0.0, 1.0, 0.0],
-                tex_coords: [u2, v2],
-            },
-            BakedModelVertex {
-                position: [0.0, 0.0, 0.0],
-                tex_coords: [u2, v1],
-            },
-            // -Y
-            BakedModelVertex {
-                position: [0.0, 0.0, 0.0],
-                tex_coords: [u1, v1],
-            },
-            BakedModelVertex {
-                position: [1.0, 0.0, 0.0],
-                tex_coords: [u2, v1],
-            },
-            BakedModelVertex {
-                position: [1.0, 0.0, 1.0],
-                tex_coords: [u2, v2],
-            },
-            BakedModelVertex {
-                position: [0.0, 0.0, 1.0],
-                tex_coords: [u1, v2],
-            },
-            // +Y
-            BakedModelVertex {
-                position: [0.0, 1.0, 1.0],
-                tex_coords: [u1, v1],
-            },
-            BakedModelVertex {
-                position: [1.0, 1.0, 1.0],
-                tex_coords: [u1, v2],
-            },
-            BakedModelVertex {
-                position: [1.0, 1.0, 0.0],
-                tex_coords: [u2, v2],
-            },
-            BakedModelVertex {
-                position: [0.0, 1.0, 0.0],
-                tex_coords: [u2, v1],
-            },
-        ];
-        let indices = vec![
-            0, 1, 2,
-            2, 3, 0,
-            4, 5, 6,
-            6, 7, 4,
-            8, 9, 10,
-            10, 11, 8,
-            12, 13, 14,
-            14, 15, 12,
-            16, 17, 18,
-            18, 19, 16,
-            20, 21, 22,
-            22, 23, 20,
-        ];
-        return BakedModel { vertices, indices, ambient_occlusion: false }
+        );
+        return BakedModel { faces, ambient_occlusion: false }
     }
 }
 
 #[derive(Default)]
 struct BakedModel {
-    vertices: Vec<BakedModelVertex>,
-    indices: Vec<u16>,
+    faces: AHashMap<Option<world::Direction>, BakedModelFace>,
     ambient_occlusion: bool,
 }
 
+#[derive(Clone, Default)]
+struct BakedModelFace {
+    vertices: Vec<BakedModelVertex>,
+    indices: Vec<u16>,
+}
+
+#[derive(Clone)]
 struct BakedModelVertex {
     position: [f32; 3],
     tex_coords: [f32; 2],

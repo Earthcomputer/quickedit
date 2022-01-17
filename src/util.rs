@@ -79,6 +79,30 @@ where
 {
     DashMap::with_hasher(ahash::RandomState::default())
 }
+#[macro_export]
+macro_rules! make_fast_dash_map {
+    ($($k:expr => $v: expr),* $(,)?) => {
+        {
+            let mut map = make_fast_dash_map();
+            $(
+                map.insert($k.clone(), $v.clone());
+            )*
+            map
+        }
+    };
+}
+#[macro_export]
+macro_rules! make_a_hash_map {
+    ($($k:expr => $v: expr),* $(,)?) => {
+        {
+            let mut map = AHashMap::new();
+            $(
+                map.insert($k.clone(), $v.clone());
+            )*
+            map
+        }
+    };
+}
 
 pub fn is_dir(path: &Path) -> bool {
     if path.is_dir() {
