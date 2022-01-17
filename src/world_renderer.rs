@@ -98,6 +98,7 @@ impl WorldRenderer {
         let vertex_buffer = glium::VertexBuffer::new(get_display(), &geometry.vertices).unwrap();
         let index_buffer = glium::IndexBuffer::new(get_display(), glium::index::PrimitiveType::TrianglesList, &geometry.indices).unwrap();
         let params = glium::DrawParameters {
+            blend: glium::Blend::alpha_blending(),
             depth: glium::Depth {
                 test: glium::DepthTest::IfLess,
                 write: true,
@@ -167,7 +168,7 @@ impl WorldRenderer {
                 * Mat4::from_translation(Vec3::new(-0.5, -0.5, -0.5))
                 * (Mat4::IDENTITY.mul_scalar(0.0625));
 
-            let _uvlock = model.uvlock; // TODO: uvlock
+            let uvlock = model.uvlock;
             let model = model.model;
             baked_model.ambient_occlusion = baked_model.ambient_occlusion && model.ambient_occlusion;
             for element in &model.elements {
@@ -203,6 +204,35 @@ impl WorldRenderer {
                             world::Direction::NegZ => (16.0 - element.to.x, 16.0 - element.to.y, 16.0 - element.from.x, 16.0 - element.from.y),
                         }
                     };
+                    let (u1, v1, u2, v2) = if uvlock {
+                        let uvlock_transform = Mat4::from_quat(Quat::from_rotation_arc(world::Pos::<f32>::from(dir.forward()).to_glam(), Vec3::Z))
+                            * model_transform
+                            * Mat4::from_quat(Quat::from_rotation_arc(Vec3::Z, world::Pos::<f32>::from(dir.forward()).to_glam()));
+                        let trans_uv = uvlock_transform.transform_point3(Vec3::new(u1, v1, 0.0));
+                        let (trans_u1, trans_v1) = (trans_uv.x, trans_uv.y);
+                        let trans_uv = model_transform.transform_point3(Vec3::new(u2, v2, 0.0));
+                        let (trans_u2, trans_v2) = (trans_uv.x, trans_uv.y);
+                        fn zero_safe_signum(n: f32) -> f32 {
+                            if n == 0.0 {
+                                n
+                            } else {
+                                n.signum()
+                            }
+                        }
+                        let (u1, u2) = if zero_safe_signum(u2 - u1) == zero_safe_signum(trans_u2 - trans_u1) {
+                            (trans_u1, trans_u2)
+                        } else {
+                            (trans_u2, trans_u1)
+                        };
+                        let (v1, v2) = if zero_safe_signum(v2 - v1) == zero_safe_signum(trans_v2 - trans_v1) {
+                            (trans_v1, trans_v2)
+                        } else {
+                            (trans_v2, trans_v1)
+                        };
+                        (u1, v1, u2, v2)
+                    } else {
+                        (u1 / 16.0, v1 / 16.0, u2 / 16.0, v2 / 16.0)
+                    };
                     let sprite = match face.texture.strip_prefix('#')
                         .and_then(|texture| model.textures.get(texture))
                         .and_then(|texture| atlas.get_sprite(texture))
@@ -210,7 +240,7 @@ impl WorldRenderer {
                         Some(sprite) => sprite,
                         None => return WorldRenderer::bake_missingno(atlas)
                     };
-                    let (u1, v1, u2, v2) = ((sprite.u1 as f32).lerp(sprite.u2 as f32, u1 / 16.0), (sprite.v1 as f32).lerp(sprite.v2 as f32, v1 / 16.0), (sprite.u1 as f32).lerp(sprite.u2 as f32, u2 / 16.0), (sprite.v1 as f32).lerp(sprite.v2 as f32, v2 / 16.0));
+                    let (u1, v1, u2, v2) = ((sprite.u1 as f32).lerp(sprite.u2 as f32, u1), (sprite.v1 as f32).lerp(sprite.v2 as f32, v1), (sprite.u1 as f32).lerp(sprite.u2 as f32, u2), (sprite.v1 as f32).lerp(sprite.v2 as f32, v2));
                     let (u1, v1, u2, v2) = (u1 / atlas.width as f32, v1 / atlas.height as f32, u2 / atlas.width as f32, v2 / atlas.height as f32);
                     let index = baked_model.vertices.len() as u16;
                     let (vert1, vert2, vert3, vert4) = match dir {

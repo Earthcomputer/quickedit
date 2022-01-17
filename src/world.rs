@@ -182,6 +182,20 @@ impl Direction {
             Direction::Down => BlockPos::new(0, -1, 0),
         }
     }
+
+    pub fn from_vector(vector: glam::Vec3) -> Self {
+        return *Direction::ALL.iter().max_by(|dir1, dir2| {
+            let dir1_dot = vector.dot(Pos::<f32>::from(dir1.forward()).to_glam());
+            let dir2_dot = vector.dot(Pos::<f32>::from(dir2.forward()).to_glam());
+            dir1_dot.partial_cmp(&dir2_dot).unwrap()
+        }).unwrap();
+    }
+
+    pub fn transform(self, transform: &glam::Mat4) -> Self {
+        let forward = Pos::<f32>::from(self.forward()).to_glam();
+        let forward_transformed = transform.transform_vector3(forward);
+        return Direction::from_vector(forward_transformed);
+    }
 }
 
 #[derive(Debug, Clone, PartialEq, Eq)]
