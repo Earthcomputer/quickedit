@@ -77,12 +77,20 @@ fn open_clicked() {
 }
 
 pub fn handle_event(ui_state: &mut UiState, ui: &conrod_core::Ui, event: &event::Event) {
+    fn move_cursor_to_middle() -> Result<(), winit::error::ExternalError> {
+        let gl_window = world_renderer::get_display().gl_window();
+        let window = gl_window.window();
+        let window_size = window.inner_size();
+        window.set_cursor_position(dpi::PhysicalPosition::new(window_size.width as f32 * 0.5, window_size.height as f32 * 0.5))
+    }
+
     match event {
         event::Event::Ui(event::Ui::Press(Some(pressed_id), event::Press{button: event::Button::Mouse(input::MouseButton::Left, _), ..})) => {
             if *pressed_id == ui.window && !ui_state.key_states.mouse_grabbed {
                 ui_state.key_states.mouse_grabbed = true;
                 if world_renderer::get_display().gl_window().window().set_cursor_grab(true).is_ok() {
                     world_renderer::get_display().gl_window().window().set_cursor_visible(false);
+                    let _ = move_cursor_to_middle(); // ignore errors
                 }
             }
         }
@@ -129,10 +137,7 @@ pub fn handle_event(ui_state: &mut UiState, ui: &conrod_core::Ui, event: &event:
                 let window_point = ui.xy_of(ui.window).unwrap();
                 ui_state.key_states.mouse_dx += x - window_point[0];
                 ui_state.key_states.mouse_dy += y - window_point[1];
-                let gl_window = world_renderer::get_display().gl_window();
-                let window = gl_window.window();
-                let window_size = window.inner_size();
-                if window.set_cursor_position(dpi::PhysicalPosition::new(window_size.width as f32 * 0.5, window_size.height as f32 * 0.5)).is_err() {
+                if move_cursor_to_middle().is_err() {
                     // unsupported on this platform
                     ui_state.key_states.mouse_dx = 0.0;
                     ui_state.key_states.mouse_dy = 0.0;
