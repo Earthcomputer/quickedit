@@ -43,8 +43,8 @@ jobs:
           GITHUB_TOKEN: ${{ secrets.GITHUB_TOKEN }}
         with:
           upload_url: ${{ needs.release.outputs.release_url }}
-          asset_path: ./target/release/mcedit_rs
-          asset_name: mcedit_rs_linux
+          asset_path: ./target/release/quickedit
+          asset_name: quickedit_linux
           asset_content_type: application/octet-stream
   windows:
     name: Build for windows
@@ -66,8 +66,8 @@ jobs:
           GITHUB_TOKEN: ${{ secrets.GITHUB_TOKEN }}
         with:
           upload_url: ${{ needs.release.outputs.release_url }}
-          asset_path: .\target\release\mcedit_rs.exe
-          asset_name: mcedit_rs_windows.exe
+          asset_path: .\target\release\quickedit.exe
+          asset_name: quickedit_windows.exe
           asset_content_type: application/octet-stream
   macos:
     name: Build for macos
@@ -87,21 +87,21 @@ jobs:
           args: --release
       - run: >
             create-dmg
-            --volname "mcedit_rs"
+            --volname "quickedit"
             --background "./res/macos_dmg_background.png"
             --window-pos 200 200
             --window-size 400 300
             --icon-size 96
-            --icon "mcedit_rs.app" 100 150
-            --hide-extension mcedit_rs.app
+            --icon "quickedit.app" 100 150
+            --hide-extension quickedit.app
             --app-drop-link 300 150
-            ./target/release/mcedit_rs.dmg ./target/release/bundle/osx/mcedit_rs.app
+            ./target/release/quickedit.dmg ./target/release/bundle/osx/quickedit.app
       - id: upload-release-asset
         uses: actions/upload-release-asset@v1
         env:
           GITHUB_TOKEN: ${{ secrets.GITHUB_TOKEN }}
         with:
           upload_url: ${{ needs.release.outputs.release_url }}
-          asset_path: ./target/release/mcedit_rs.dmg
-          asset_name: mcedit_rs_macos.dmg
+          asset_path: ./target/release/quickedit.dmg
+          asset_name: quickedit_macos.dmg
           asset_content_type: application/octet-stream

@@ -1,5 +1,5 @@
 [package]
-name = "mcedit_rs"
+name = "quickedit"
 description = "Minecraft world editor written in Rust"
 version = "1.0.0"
 authors = ["Earthcomputer <burtonjae@hotmail.co.uk>"]
@@ -46,7 +46,7 @@ winres = "0.1.12"
 gl_generator = "0.14.0"
 
 [package.metadata.bundle]
-identifier = "net.earthcomputer.mcedit_rs"
+identifier = "net.earthcomputer.quickedit"
 icon = ["res/icon_16x16.png",
     "res/icon_32x32.png",
     "res/icon_128x128.png",

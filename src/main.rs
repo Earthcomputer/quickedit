@@ -41,7 +41,7 @@ mod gl {
 }
 
 #[derive(StructOpt)]
-#[structopt(name = "mcedit_rs", about = "A Minecraft world editor")]
+#[structopt(name = "quickedit", about = "A Minecraft world editor")]
 struct CmdLineArgs {
     #[structopt(short = "w", long = "world")]
     world: Option<PathBuf>,
@@ -132,7 +132,7 @@ fn main() {
 
     let event_loop = event_loop::EventLoop::new();
     let wb = window::WindowBuilder::new()
-        .with_title("MCEdit RS")
+        .with_title("QuickEdit")
         .with_window_icon(Some(ICON.with(|i| i.clone())))
         .with_inner_size(dpi::LogicalSize::new(WIDTH, HEIGHT));
     let cb = ContextBuilder::new().with_depth_buffer(24);
