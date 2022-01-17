@@ -1,5 +1,5 @@
 use ahash::AHashMap;
-use glam::{EulerRot, Mat4, Quat, Vec3, Vec4};
+use glam::{Mat4, Quat, Vec3, Vec4};
 use glium::{Surface, uniform};
 use num_traits::FloatConst;
 use crate::{CommonFNames, fname, make_a_hash_map, util, world};
@@ -84,7 +84,7 @@ impl WorldRenderer {
         let camera_pos = world::Pos::<f32>::from(world.camera.pos).to_glam();
         let camera_yaw = world.camera.yaw.to_radians();
         let camera_pitch = world.camera.pitch.to_radians();
-        let view_matrix = Mat4::from_rotation_translation(Quat::from_euler(EulerRot::XYZ, camera_pitch, camera_yaw, 0.0), camera_pos).inverse();
+        let view_matrix = Mat4::from_rotation_x(-camera_pitch) * Mat4::from_rotation_y(-camera_yaw) * Mat4::from_translation(-camera_pos);
 
         let uniforms = uniform! {
                     projection_matrix: projection.to_cols_array_2d(),

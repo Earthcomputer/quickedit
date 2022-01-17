@@ -194,8 +194,10 @@ fn main() {
                 should_exit,
             } => {
                 if let Some(event) = convert_event(event, display.gl_window().window()) {
-                    ui::handle_event(&mut *ui_state.borrow_mut(), &event);
                     my_ui.handle_event(event);
+                    for event in my_ui.global_input().events() {
+                        ui::handle_event(&mut *ui_state.borrow_mut(), &my_ui, event);
+                    }
                     *should_update_ui = true;
                 }
 
@@ -206,7 +208,7 @@ fn main() {
             Request::SetUi { needs_redraw } => {
                 let my_ui = &mut my_ui.set_widgets();
                 ui::set_ui(&*(*ui_state).borrow(), my_ui);
-                ui::tick(&*(*ui_state).borrow());
+                ui::tick(&mut *(*ui_state).borrow_mut());
                 *needs_redraw = my_ui.has_changed() || {
                     let worlds = world::WORLDS.read().unwrap();
                     worlds.iter().any(|world| world.unwrap().renderer.has_changed())

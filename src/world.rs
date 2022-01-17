@@ -528,7 +528,7 @@ impl Camera {
         self.pos.x += x;
         self.pos.y += y;
         self.pos.z += z;
-        self.yaw = (self.yaw + yaw).clamp(-180.0, 180.0);
+        self.yaw = (self.yaw + yaw).rem_euclid(360.0);
         self.pitch = (self.pitch + pitch).clamp(-90.0, 90.0);
     }
 }
