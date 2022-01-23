@@ -82,7 +82,7 @@ macro_rules! define_paletted_data {
             }
 
             fn direct_init(palette: Vec<$type>, data: Vec<u64>) -> Self {
-                let bits_per_block = palette.len().log2() as u8;
+                let bits_per_block = (((palette.len() - 1).log2() + 1) as u8).max($default_palette_size.log2() as u8);
                 let entries_per_long = 64_u8 / bits_per_block;
                 let mut inv_palette = HashMap::new();
                 for (i, v) in palette.iter().enumerate() {
@@ -98,7 +98,7 @@ macro_rules! define_paletted_data {
             }
 
             fn get(&self, x: usize, y: usize, z: usize) -> &$type {
-                let index = x << ($h_bits + $v_bits) | z << $v_bits | y;
+                let index = y << ($h_bits + $h_bits) | z << $h_bits | x;
                 let (bit, inbit) = index.div_mod_floor(&(self.entries_per_long as usize));
                 return &self.palette[((self.data[bit] >> (inbit * self.bits_per_block as usize)) & ((1 << self.bits_per_block) - 1)) as usize];
             }
@@ -115,7 +115,7 @@ macro_rules! define_paletted_data {
                         self.palette.len() - 1
                     }
                 };
-                let index = x << ($h_bits + $v_bits) | z << $v_bits | y;
+                let index = y << ($h_bits + $h_bits) | z << $h_bits | x;
                 let (bit, inbit) = index.div_mod_floor(&(self.entries_per_long as usize));
                 self.data[bit] &= !(((1 << self.bits_per_block) - 1) << (inbit * self.bits_per_block as usize));
                 self.data[bit] |= (val as u64) << (inbit * self.bits_per_block as usize);

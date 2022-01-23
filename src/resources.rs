@@ -670,6 +670,7 @@ impl<'de> Deserialize<'de> for VariantPairs {
                             continue;
                         }
                         let (prop, val) = prop.split_at(prop.find('=').ok_or_else(|| V::Error::custom("Invalid variant key format"))?);
+                        let val = val.strip_prefix('=').unwrap();
                         properties.insert(fname::from_str(prop), fname::from_str(val));
                     }
                     pairs.push(VariantPair{ properties, value });
