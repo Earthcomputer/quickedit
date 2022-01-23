@@ -32,6 +32,13 @@ impl ResourceLocation {
         }
     }
 
+    pub fn quickedit<T: Into<String>>(name: T) -> ResourceLocation {
+        ResourceLocation {
+            namespace: "quickedit".to_string(),
+            name: name.into(),
+        }
+    }
+
     pub fn new<T: Into<String>, U: Into<String>>(namespace: T, name: U) -> Self {
         ResourceLocation {
             namespace: namespace.into(),

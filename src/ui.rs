@@ -166,9 +166,9 @@ pub fn tick(ui_state: &mut UiState) {
     let mut yaw = 0.0;
     let mut pitch = 0.0;
 
-    let movement_speed = 0.1;
+    let movement_speed = 1.0;
     let rotation_speed = 3.0;
-    let mouse_sensitivity = 0.1;
+    let mouse_sensitivity = 0.05;
 
     if ui_state.key_states.neg_x_down {
         x -= movement_speed;

@@ -1,0 +1,8 @@
+{
+  "parent": "block/cube_bottom_top",
+  "textures": {
+    "top": "#particle",
+    "bottom": "quickedit:block/cyan_shulker_box_bottom",
+    "side": "quickedit:block/cyan_shulker_box_side"
+  }
+}
