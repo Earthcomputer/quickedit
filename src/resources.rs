@@ -8,11 +8,12 @@ use ahash::{AHashMap, AHashSet};
 use image::{GenericImage, GenericImageView};
 use lazy_static::lazy_static;
 use path_slash::{PathBufExt, PathExt};
-use crate::{fname, gl, minecraft, ResourceLocation, util, world};
+use crate::{fname, geom, gl, minecraft, ResourceLocation, util, renderer};
 use serde::{Deserialize, Deserializer};
 use serde::de::{Error, IntoDeserializer};
 use crate::fname::FName;
 use crate::fname::CommonFNames;
+use crate::util::make_fast_dash_map;
 use crate::world::IBlockState;
 
 lazy_static! {
@@ -654,9 +655,9 @@ pub enum TextureVariable {
 #[derive(Clone, Deserialize)]
 pub struct ModelElement {
     #[serde(deserialize_with = "deserialize_float_coord")]
-    pub from: world::Pos<f32>,
+    pub from: glam::Vec3,
     #[serde(deserialize_with = "deserialize_float_coord")]
-    pub to: world::Pos<f32>,
+    pub to: glam::Vec3,
     #[serde(default)]
     pub rotation: ElementRotation,
     #[serde(default = "default_true")]
@@ -668,8 +669,8 @@ pub struct ModelElement {
 #[derive(Clone, Deserialize)]
 pub struct ElementRotation {
     #[serde(deserialize_with = "deserialize_float_coord")]
-    pub origin: world::Pos<f32>,
-    pub axis: world::Axis,
+    pub origin: glam::Vec3,
+    pub axis: geom::Axis,
     pub angle: f32,
     #[serde(default)]
     pub rescale: bool,
@@ -686,17 +687,17 @@ pub struct ElementFaces {
 }
 
 impl<'a> IntoIterator for &'a ElementFaces {
-    type Item = (world::Direction, &'a ElementFace);
-    type IntoIter = FilterMap<<Vec<(world::Direction, &'a Option<ElementFace>)> as IntoIterator>::IntoIter, fn((world::Direction, &'a Option<ElementFace>)) -> Option<(world::Direction, &'a ElementFace)>>;
+    type Item = (geom::Direction, &'a ElementFace);
+    type IntoIter = FilterMap<<Vec<(geom::Direction, &'a Option<ElementFace>)> as IntoIterator>::IntoIter, fn((geom::Direction, &'a Option<ElementFace>)) -> Option<(geom::Direction, &'a ElementFace)>>;
 
     fn into_iter(self) -> Self::IntoIter {
         vec![
-            (world::Direction::Up, &self.up),
-            (world::Direction::Down, &self.down),
-            (world::Direction::North, &self.north),
-            (world::Direction::South, &self.south),
-            (world::Direction::West, &self.west),
-            (world::Direction::East, &self.east),
+            (geom::Direction::Up, &self.up),
+            (geom::Direction::Down, &self.down),
+            (geom::Direction::North, &self.north),
+            (geom::Direction::South, &self.south),
+            (geom::Direction::West, &self.west),
+            (geom::Direction::East, &self.east),
         ].into_iter().filter_map(|(dir, face)| face.as_ref().map(|face| (dir, face)))
     }
 }
@@ -706,7 +707,7 @@ pub struct ElementFace {
     pub uv: Option<Uv>,
     pub texture: String,
     #[serde(default, deserialize_with = "deserialize_cullface")]
-    pub cullface: Option<world::Direction>,
+    pub cullface: Option<geom::Direction>,
     #[serde(default)]
     pub rotation: u16,
     #[serde(rename = "tintindex", default = "default_tint_index")]
@@ -750,8 +751,8 @@ impl<'de> Deserialize<'de> for Uv {
 impl Default for ElementRotation {
     fn default() -> Self {
         ElementRotation {
-            origin: world::Pos::new(0.0, 0.0, 0.0),
-            axis: world::Axis::X,
+            origin: glam::Vec3::new(0.0, 0.0, 0.0),
+            axis: geom::Axis::X,
             angle: 0.0,
             rescale: false,
         }
@@ -784,37 +785,37 @@ const fn default_true() -> bool {
     true
 }
 
-fn deserialize_float_coord<'de, D>(deserializer: D) -> Result<world::Pos<f32>, D::Error> where D: Deserializer<'de> {
+fn deserialize_float_coord<'de, D>(deserializer: D) -> Result<glam::Vec3, D::Error> where D: Deserializer<'de> {
     struct MyVisitor;
     impl<'de> serde::de::Visitor<'de> for MyVisitor {
-        type Value = world::Pos<f32>;
+        type Value = glam::Vec3;
 
         fn expecting(&self, formatter: &mut fmt::Formatter) -> fmt::Result {
             formatter.write_str("a float coordinate")
         }
 
-        fn visit_seq<V>(self, mut seq: V) -> Result<world::Pos<f32>, V::Error> where V: serde::de::SeqAccess<'de> {
+        fn visit_seq<V>(self, mut seq: V) -> Result<glam::Vec3, V::Error> where V: serde::de::SeqAccess<'de> {
             let x = seq.next_element()?.ok_or_else(|| serde::de::Error::invalid_length(0, &self))?;
             let y = seq.next_element()?.ok_or_else(|| serde::de::Error::invalid_length(1, &self))?;
             let z = seq.next_element()?.ok_or_else(|| serde::de::Error::invalid_length(2, &self))?;
-            Ok(world::Pos::new(x, y, z))
+            Ok(glam::Vec3::new(x, y, z))
         }
     }
     deserializer.deserialize_any(MyVisitor{})
 }
 
-fn deserialize_cullface<'de, D>(deserializer: D) -> Result<Option<world::Direction>, D::Error> where D: Deserializer<'de> {
+fn deserialize_cullface<'de, D>(deserializer: D) -> Result<Option<geom::Direction>, D::Error> where D: Deserializer<'de> {
     struct MyVisitor;
     impl<'de> serde::de::Visitor<'de> for MyVisitor {
-        type Value = Option<world::Direction>;
+        type Value = Option<geom::Direction>;
 
         fn expecting(&self, formatter: &mut fmt::Formatter) -> fmt::Result {
             formatter.write_str("a cullface")
         }
 
-        fn visit_str<E>(self, v: &str) -> Result<Option<world::Direction>, E> where E: Error {
+        fn visit_str<E>(self, v: &str) -> Result<Option<geom::Direction>, E> where E: Error {
             return if v == "bottom" {
-                Ok(Some(world::Direction::Down))
+                Ok(Some(geom::Direction::Down))
             } else {
                 Ok(Some(Deserialize::deserialize(v.into_deserializer())?))
             }
@@ -852,6 +853,7 @@ pub struct Sprite {
     pub v1: u32,
     pub u2: u32,
     pub v2: u32,
+    pub transparency: renderer::Transparency,
 }
 
 fn stitch<P: image::Pixel<Subpixel=u8> + 'static, I: image::GenericImageView<Pixel=P>>(
@@ -989,10 +991,13 @@ fn stitch<P: image::Pixel<Subpixel=u8> + 'static, I: image::GenericImageView<Pix
         slot.add_leafs(&mut leafs);
     }
     let mut atlas: image::ImageBuffer<P, _> = image::ImageBuffer::new(width, height);
+    let transparencies = make_fast_dash_map();
     unsafe {
         util::parallel_iter_to_output(&leafs, &mut atlas, |leaf, atlas| {
-            if let SlotData::Leaf(_, texture) = leaf.data {
+            if let SlotData::Leaf(name, texture) = leaf.data {
                 atlas.copy_from(texture, leaf.x, leaf.y).unwrap();
+                let transparency = calc_transparency(texture);
+                transparencies.insert(name, transparency);
             } else {
                 unreachable!();
             }
@@ -1005,6 +1010,7 @@ fn stitch<P: image::Pixel<Subpixel=u8> + 'static, I: image::GenericImageView<Pix
                 v1: leaf.y,
                 u2: leaf.x + leaf.width,
                 v2: leaf.y + leaf.height,
+                transparency: *transparencies.get(name).unwrap(),
             })
         } else {
             unreachable!()
@@ -1017,4 +1023,22 @@ fn stitch<P: image::Pixel<Subpixel=u8> + 'static, I: image::GenericImageView<Pix
         data: atlas.into_raw(),
         sprites,
     })
+}
+
+fn calc_transparency<P: image::Pixel<Subpixel=u8>, I: image::GenericImageView<Pixel=P>>(texture: &I) -> renderer::Transparency {
+    let mut seen_transparent_pixel = false;
+    for (_, _, pixel) in texture.pixels() {
+        let alpha = pixel.to_rgba()[3];
+        if alpha != 255 {
+            if alpha != 0 {
+                return renderer::Transparency::Translucent;
+            }
+            seen_transparent_pixel = true;
+        }
+    }
+    if seen_transparent_pixel {
+        renderer::Transparency::Transparent
+    } else {
+        renderer::Transparency::Opaque
+    }
 }

@@ -85,7 +85,7 @@ macro_rules! make_fast_dash_map {
         {
             let mut map = make_fast_dash_map();
             $(
-                map.insert($k.clone(), $v.clone());
+                map.insert($k, $v);
             )*
             map
         }
@@ -97,7 +97,7 @@ macro_rules! make_a_hash_map {
         {
             let mut map = AHashMap::new();
             $(
-                map.insert($k.clone(), $v.clone());
+                map.insert($k, $v);
             )*
             map
         }

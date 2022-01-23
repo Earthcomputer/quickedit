@@ -1,7 +1,7 @@
 use conrod_core::{Colorable, event, input, Labelable, Positionable, Sizeable, widget, Widget, widget_ids};
 use glam::{DMat2, DVec2};
 use winit::dpi;
-use crate::{CommonFNames, minecraft, world, world_renderer};
+use crate::{CommonFNames, geom, minecraft, world, renderer};
 
 widget_ids!(pub struct Ids {
     debug,
@@ -72,13 +72,15 @@ fn open_clicked() {
             worlds.push(world::WorldRef(world));
         }
         let worlds = world::WORLDS.read().unwrap();
-        worlds.last().unwrap().unwrap().get_dimension(CommonFNames.OVERWORLD.clone()).unwrap().load_chunk(worlds.last().unwrap().unwrap(), world::ChunkPos::new(0, 0));
+        let dimension_cell = worlds.last().unwrap().unwrap().get_dimension(&CommonFNames.OVERWORLD).unwrap();
+        let mut dimension = dimension_cell.write().unwrap();
+        dimension.load_chunk(worlds.last().unwrap().unwrap(), geom::ChunkPos::new(0, 0));
     }
 }
 
 pub fn handle_event(ui_state: &mut UiState, ui: &conrod_core::Ui, event: &event::Event) {
     fn move_cursor_to_middle() -> Result<(), winit::error::ExternalError> {
-        let gl_window = world_renderer::get_display().gl_window();
+        let gl_window = renderer::get_display().gl_window();
         let window = gl_window.window();
         let window_size = window.inner_size();
         window.set_cursor_position(dpi::PhysicalPosition::new(window_size.width as f32 * 0.5, window_size.height as f32 * 0.5))
@@ -88,8 +90,8 @@ pub fn handle_event(ui_state: &mut UiState, ui: &conrod_core::Ui, event: &event:
         event::Event::Ui(event::Ui::Press(Some(pressed_id), event::Press{button: event::Button::Mouse(input::MouseButton::Left, _), ..})) => {
             if *pressed_id == ui.window && !ui_state.key_states.mouse_grabbed {
                 ui_state.key_states.mouse_grabbed = true;
-                if world_renderer::get_display().gl_window().window().set_cursor_grab(true).is_ok() {
-                    world_renderer::get_display().gl_window().window().set_cursor_visible(false);
+                if renderer::get_display().gl_window().window().set_cursor_grab(true).is_ok() {
+                    renderer::get_display().gl_window().window().set_cursor_visible(false);
                     let _ = move_cursor_to_middle(); // ignore errors
                 }
             }
@@ -99,8 +101,8 @@ pub fn handle_event(ui_state: &mut UiState, ui: &conrod_core::Ui, event: &event:
                 match key {
                     input::Key::Escape => {
                         ui_state.key_states.mouse_grabbed = false;
-                        if world_renderer::get_display().gl_window().window().set_cursor_grab(false).is_ok() {
-                            world_renderer::get_display().gl_window().window().set_cursor_visible(true);
+                        if renderer::get_display().gl_window().window().set_cursor_grab(false).is_ok() {
+                            renderer::get_display().gl_window().window().set_cursor_visible(true);
                         }
                     }
                     input::Key::A => ui_state.key_states.neg_x_down = true,

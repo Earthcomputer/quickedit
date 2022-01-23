@@ -1,7 +1,9 @@
+#![feature(can_vector)]
+#![feature(derive_default_enum)]
+#![feature(exact_size_is_empty)]
 #![feature(int_log)]
 #![feature(int_roundings)]
 #![feature(option_result_contains)]
-#![feature(can_vector)]
 #![feature(read_buf)]
 #![feature(try_find)]
 
@@ -13,8 +15,9 @@ mod util;
 mod fname;
 mod minecraft;
 mod ui;
-mod world_renderer;
+mod renderer;
 mod resources;
+mod geom;
 
 extern crate conrod_core;
 extern crate conrod_glium;
@@ -138,7 +141,7 @@ fn main() {
     let cb = ContextBuilder::new().with_depth_buffer(24);
     let display = Display::new(wb, cb, &event_loop).unwrap();
     unsafe {
-        world_renderer::set_display(&display);
+        renderer::set_display(&display);
     }
     gl::load_with(|s| display.gl_window().get_proc_address(s) as *const _);
 
@@ -169,6 +172,9 @@ fn main() {
 
         let mut worlds = world::WORLDS.write().unwrap();
         worlds.push(world::WorldRef(world));
+        let dimension_cell = worlds.last().unwrap().unwrap().get_dimension(&CommonFNames.OVERWORLD).unwrap();
+        let mut dimension = dimension_cell.write().unwrap();
+        dimension.load_chunk(worlds.last().unwrap().unwrap(), geom::ChunkPos::new(0, 0));
     }
 
     let mut my_ui = conrod_core::UiBuilder::new([WIDTH, HEIGHT]).build();
@@ -180,12 +186,12 @@ fn main() {
     let ui_state = Rc::new(RefCell::new(ui::init_ui(&mut my_ui)));
 
     unsafe {
-        world_renderer::clear_display();
+        renderer::clear_display();
     }
 
     run_loop(display, event_loop, ui_state.clone(), move |request, display| {
         unsafe {
-            world_renderer::set_display(display);
+            renderer::set_display(display);
         }
         match request {
             Request::Event {
@@ -223,7 +229,9 @@ fn main() {
                 {
                     let worlds = world::WORLDS.read().unwrap();
                     if let Some(world) = worlds.last() {
-                        world.unwrap().renderer.render_world(world.unwrap(), &mut target);
+                        let arc = world.unwrap().get_dimension(&CommonFNames.OVERWORLD).unwrap();
+                        let dimension = arc.read().unwrap();
+                        world.unwrap().renderer.render_world(world.unwrap(), &*dimension, &mut target);
                     }
                 }
 
@@ -232,7 +240,7 @@ fn main() {
             }
         }
         unsafe {
-            world_renderer::clear_display();
+            renderer::clear_display();
         }
     });
 }

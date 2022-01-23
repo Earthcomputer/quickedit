@@ -16,6 +16,10 @@ float get_brightness(float light_level) {
 }
 
 void main() {
+    vec4 tex_color = texture(tex, v_tex_coords);
+#ifdef TRANSPARENCY
+    if (tex_color.a < 0.5) discard;
+#endif
     float sky_brightness = get_brightness(v_lightmap_coords.x) * sky_brightness;
     float block_brightness = get_brightness(v_lightmap_coords.y) * 1.5;
     vec3 block_color = vec3(
@@ -37,5 +41,5 @@ void main() {
     block_color = mix(block_color, vec3(0.75, 0.75, 0.75), 0.04);
     block_color = clamp(block_color, vec3(0.0, 0.0, 0.0), vec3(1.0, 1.0, 1.0));
 
-    color = texture(tex, v_tex_coords) * vec4(block_color, 1.0);
+    color = tex_color * vec4(block_color, 1.0);
 }

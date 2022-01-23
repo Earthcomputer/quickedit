@@ -1,6 +1,7 @@
 use std::collections::HashMap;
 use std::{fs, io, mem};
 use std::borrow::{Borrow, BorrowMut};
+use std::cell::RefCell;
 use std::collections::hash_map::DefaultHasher;
 use std::hash::{Hash, Hasher};
 use std::io::Cursor;
@@ -15,187 +16,14 @@ use lazy_static::lazy_static;
 use num_integer::Integer;
 use positioned_io_preview::{RandomAccessFile, ReadAt};
 use crate::fname::{CommonFNames, FName};
-use crate::minecraft;
+use crate::{minecraft, renderer};
+use crate::geom::{BlockPos, ChunkPos};
 use crate::resources;
 use crate::util::{FastDashMap, make_fast_dash_map};
-use crate::world_renderer::WorldRenderer;
+use crate::renderer::WorldRenderer;
 
 lazy_static! {
     pub static ref WORLDS: RwLock<Vec<WorldRef>> = RwLock::new(Vec::new());
-}
-
-#[derive(Debug, Default, Clone, Copy, PartialEq, Eq, Hash)]
-pub struct ChunkPos {
-    x: i32,
-    z: i32,
-}
-
-impl ChunkPos {
-    pub fn new(x: i32, z: i32) -> Self {
-        ChunkPos { x, z }
-    }
-}
-
-#[derive(Debug, Default, Clone, Copy, PartialEq, Eq, Hash)]
-pub struct Pos<T> {
-    pub x: T,
-    pub y: T,
-    pub z: T,
-}
-
-impl<T> Pos<T> {
-    pub fn new(x: T, y: T, z: T) -> Self {
-        Pos { x, y, z }
-    }
-}
-
-macro_rules! pos_conversion_functions {
-    ($type:ty $(,$other_types:ty)*) => {
-        $(
-        impl From<Pos<$other_types>> for Pos<$type> {
-            fn from(pos: Pos<$other_types>) -> Self {
-                Pos::new(pos.x as $type, pos.y as $type, pos.z as $type)
-            }
-        }
-        )*
-    };
-}
-macro_rules! pos_glam_conversion_functions {
-    ($type:ty, $glam_type:ty) => {
-        impl From<Pos<$type>> for $glam_type {
-            fn from(pos: Pos<$type>) -> Self {
-                <$glam_type>::new(pos.x, pos.y, pos.z)
-            }
-        }
-
-        impl From<$glam_type> for Pos<$type> {
-            fn from(pos: $glam_type) -> Self {
-                Pos::new(pos.x, pos.y, pos.z)
-            }
-        }
-
-        impl Pos<$type> {
-            pub fn to_glam(self) -> $glam_type {
-                <$glam_type>::new(self.x, self.y, self.z)
-            }
-        }
-    };
-}
-pos_conversion_functions!(f32, f64, i32, i64, u32, u64);
-pos_conversion_functions!(f64, f32, i32, i64, u32, u64);
-pos_conversion_functions!(i32, f32, f64, i64, u32, u64);
-pos_conversion_functions!(u32, f32, f64, i32, i64, u64);
-pos_conversion_functions!(i64, f32, f64, i32, u32, u64);
-pos_conversion_functions!(u64, f32, f64, i32, i64, u32);
-pos_glam_conversion_functions!(f32, glam::Vec3);
-pos_glam_conversion_functions!(f64, glam::DVec3);
-pos_glam_conversion_functions!(i32, glam::IVec3);
-pos_glam_conversion_functions!(u32, glam::UVec3);
-
-pub type BlockPos = Pos<i32>;
-
-#[derive(Debug, Clone, Copy, PartialEq, Eq, Hash, Deserialize)]
-pub enum Axis {
-    #[serde(rename = "x")]
-    X,
-    #[serde(rename = "y")]
-    Y,
-    #[serde(rename = "z")]
-    Z,
-}
-
-#[derive(Debug, Clone, Copy, PartialEq, Eq, Hash, Deserialize)]
-pub enum Direction {
-    #[serde(rename = "north")]
-    North,
-    #[serde(rename = "south")]
-    South,
-    #[serde(rename = "east")]
-    East,
-    #[serde(rename = "west")]
-    West,
-    #[serde(rename = "up")]
-    Up,
-    #[serde(rename = "down")]
-    Down,
-}
-
-#[allow(non_upper_case_globals)]
-impl Direction {
-    pub const NegX: Direction = Direction::West;
-    pub const NegY: Direction = Direction::Down;
-    pub const NegZ: Direction = Direction::North;
-    pub const PosX: Direction = Direction::East;
-    pub const PosY: Direction = Direction::Up;
-    pub const PosZ: Direction = Direction::South;
-
-    pub const ALL: [Direction; 6] = [
-        Direction::North,
-        Direction::South,
-        Direction::East,
-        Direction::West,
-        Direction::Up,
-        Direction::Down,
-    ];
-
-    pub const HORIZONTAL: [Direction; 4] = [
-        Direction::North,
-        Direction::South,
-        Direction::East,
-        Direction::West,
-    ];
-
-    pub const VERTICAL: [Direction; 2] = [
-        Direction::Up,
-        Direction::Down,
-    ];
-
-    pub fn axis(self) -> Axis {
-        match self {
-            Direction::North => Axis::Z,
-            Direction::South => Axis::Z,
-            Direction::East => Axis::X,
-            Direction::West => Axis::X,
-            Direction::Up => Axis::Y,
-            Direction::Down => Axis::Y,
-        }
-    }
-
-    pub fn opposite(self) -> Self {
-        match self {
-            Direction::North => Direction::South,
-            Direction::South => Direction::North,
-            Direction::East => Direction::West,
-            Direction::West => Direction::East,
-            Direction::Up => Direction::Down,
-            Direction::Down => Direction::Up,
-        }
-    }
-
-    pub fn forward(self) -> BlockPos {
-        match self {
-            Direction::North => BlockPos::new(0, 0, -1),
-            Direction::South => BlockPos::new(0, 0, 1),
-            Direction::East => BlockPos::new(1, 0, 0),
-            Direction::West => BlockPos::new(-1, 0, 0),
-            Direction::Up => BlockPos::new(0, 1, 0),
-            Direction::Down => BlockPos::new(0, -1, 0),
-        }
-    }
-
-    pub fn from_vector(vector: glam::Vec3) -> Self {
-        return *Direction::ALL.iter().max_by(|dir1, dir2| {
-            let dir1_dot = vector.dot(Pos::<f32>::from(dir1.forward()).to_glam());
-            let dir2_dot = vector.dot(Pos::<f32>::from(dir2.forward()).to_glam());
-            dir1_dot.partial_cmp(&dir2_dot).unwrap()
-        }).unwrap();
-    }
-
-    pub fn transform(self, transform: &glam::Mat4) -> Self {
-        let forward = Pos::<f32>::from(self.forward()).to_glam();
-        let forward_transformed = transform.transform_vector3(forward);
-        return Direction::from_vector(forward_transformed);
-    }
 }
 
 #[derive(Debug, Clone, PartialEq, Eq)]
@@ -327,6 +155,18 @@ define_paletted_data!(BiomeData, FName, 2_usize, 2_usize, 4_usize);
 pub struct Subchunk {
     block_data: BlockData,
     biome_data: BiomeData,
+
+    pub baked_geometry: RefCell<Option<renderer::BakedChunkGeometry>>,
+}
+
+impl Subchunk {
+    pub fn get_block_state(&self, pos: BlockPos) -> &IBlockState {
+        self.block_data.get(pos.x as usize, pos.y as usize, pos.z as usize)
+    }
+
+    pub fn set_block_state(&mut self, pos: BlockPos, value: &IBlockState) {
+        self.block_data.set(pos.x as usize, pos.y as usize, pos.z as usize, value);
+    }
 }
 
 pub struct Chunk {
@@ -343,8 +183,8 @@ impl Chunk {
 
 pub struct Dimension {
     id: FName,
-    min_y: i32,
-    max_y: i32,
+    pub min_y: i32,
+    pub max_y: i32,
     chunks: FastDashMap<ChunkPos, Arc<Chunk>>,
 }
 
@@ -377,17 +217,18 @@ impl Dimension {
         }
     }
 
-    pub fn load_chunk(&self, world: &World, pos: ChunkPos) {
-        let _chunk = self.read_chunk(world, pos).unwrap();
+    pub fn load_chunk(&mut self, world: &World, pos: ChunkPos) {
+        let chunk = self.read_chunk(world, pos).unwrap();
+        self.chunks.insert(pos, Arc::new(chunk));
     }
 
     fn read_chunk(&self, world: &World, pos: ChunkPos) -> io::Result<Chunk> {
         let save_dir = self.get_save_dir(world);
-        let region_path = save_dir.join("region").join(format!("r.{}.{}.mca", pos.x >> 5, pos.z >> 5));
+        let region_path = save_dir.join("region").join(format!("r.{}.{}.mca", pos.x >> 5, pos.y >> 5));
         let raf = RandomAccessFile::open(region_path)?;
         #[allow(clippy::uninit_assumed_init)]
         let mut sector_data: [u8; 4] = unsafe { MaybeUninit::uninit().assume_init() };
-        raf.read_exact_at((((pos.x & 31) | ((pos.z & 31) << 5)) << 2) as u64, &mut sector_data)?;
+        raf.read_exact_at((((pos.x & 31) | ((pos.y & 31) << 5)) << 2) as u64, &mut sector_data)?;
         let offset = Cursor::new(sector_data).read_u24::<BigEndian>()? as u64 * 4096;
         let size = sector_data[3] as usize * 4096;
         if size < 5 {
@@ -502,6 +343,7 @@ impl Dimension {
                     chunk.subchunks.push(Some(Subchunk {
                         block_data: BlockData::direct_init(palette, data),
                         biome_data: BiomeData::new(),
+                        baked_geometry: RefCell::new(None),
                     }));
                 } else {
                     chunk.subchunks.push(None);
@@ -518,7 +360,7 @@ impl Dimension {
 
 #[derive(Default)]
 pub struct Camera {
-    pub pos: Pos<f64>,
+    pub pos: glam::DVec3,
     pub yaw: f32,
     pub pitch: f32,
 }
@@ -561,7 +403,7 @@ pub struct World {
     path: PathBuf,
     pub resources: resources::Resources,
     pub renderer: WorldRenderer,
-    dimensions: FastDashMap<FName, Arc<Dimension>>,
+    dimensions: FastDashMap<FName, Arc<RwLock<Dimension>>>,
 }
 
 impl World {
@@ -585,17 +427,14 @@ impl World {
         let mut overworld = Dimension::new(CommonFNames.OVERWORLD.clone());
         overworld.min_y = -64;
         overworld.max_y = 384;
-        world.dimensions.insert(CommonFNames.OVERWORLD.clone(), Arc::new(overworld));
-        world.dimensions.insert(CommonFNames.THE_NETHER.clone(), Arc::new(Dimension::new(CommonFNames.THE_NETHER.clone())));
-        world.dimensions.insert(CommonFNames.THE_END.clone(), Arc::new(Dimension::new(CommonFNames.THE_END.clone())));
+        world.dimensions.insert(CommonFNames.OVERWORLD.clone(), Arc::new(RwLock::new(overworld)));
+        world.dimensions.insert(CommonFNames.THE_NETHER.clone(), Arc::new(RwLock::new(Dimension::new(CommonFNames.THE_NETHER.clone()))));
+        world.dimensions.insert(CommonFNames.THE_END.clone(), Arc::new(RwLock::new(Dimension::new(CommonFNames.THE_END.clone()))));
         Ok(world)
     }
 
-    pub fn get_dimension(&self, id: FName) -> Option<Arc<Dimension>> {
-        match self.dimensions.entry(id) {
-            Entry::Occupied(entry) => Some(entry.get().clone()),
-            Entry::Vacant(_) => None
-        }
+    pub fn get_dimension(&self, id: &FName) -> Option<Arc<RwLock<Dimension>>> {
+        self.dimensions.view(id, |_, dim| dim.clone())
     }
 }
 
