@@ -146,6 +146,12 @@ pub fn handle_event(ui_state: &mut UiState, ui: &conrod_core::Ui, event: &event:
                 }
             }
         }
+        event::Event::Raw(event::Input::Focus(false)) => {
+            ui_state.key_states.mouse_grabbed = false;
+            if renderer::get_display().gl_window().window().set_cursor_grab(false).is_ok() {
+                renderer::get_display().gl_window().window().set_cursor_visible(true);
+            }
+        }
         _ => {}
     }
 }

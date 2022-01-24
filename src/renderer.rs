@@ -298,20 +298,19 @@ impl WorldRenderer {
         for model in models {
             let model_transform = Mat4::from_translation(Vec3::new(0.5, 0.5, 0.5))
                 * match model.x_rotation.rem_euclid(360) {
-                    90 => Mat4::from_cols(Vec4::X, Vec4::Z, -Vec4::Y, Vec4::ZERO),
-                    180 => Mat4::from_cols(Vec4::X, -Vec4::Y, -Vec4::Z, Vec4::ZERO),
-                    270 => Mat4::from_cols(Vec4::X, -Vec4::Z, Vec4::Y, Vec4::ZERO),
+                    90 => Mat4::from_cols(Vec4::X, Vec4::Z, -Vec4::Y, Vec4::W),
+                    180 => Mat4::from_cols(Vec4::X, -Vec4::Y, -Vec4::Z, Vec4::W),
+                    270 => Mat4::from_cols(Vec4::X, -Vec4::Z, Vec4::Y, Vec4::W),
                     _ => Mat4::IDENTITY,
                 }
                 * match model.y_rotation.rem_euclid(360) {
-                    90 => Mat4::from_cols(Vec4::Z, Vec4::Y, -Vec4::X, Vec4::ZERO),
-                    180 => Mat4::from_cols(-Vec4::X, Vec4::Y, -Vec4::Z, Vec4::ZERO),
-                    270 => Mat4::from_cols(-Vec4::Z, Vec4::Y, Vec4::X, Vec4::ZERO),
+                    90 => Mat4::from_cols(Vec4::Z, Vec4::Y, -Vec4::X, Vec4::W),
+                    180 => Mat4::from_cols(-Vec4::X, Vec4::Y, -Vec4::Z, Vec4::W),
+                    270 => Mat4::from_cols(-Vec4::Z, Vec4::Y, Vec4::X, Vec4::W),
                     _ => Mat4::IDENTITY,
                 }
                 * Mat4::from_translation(Vec3::new(-0.5, -0.5, -0.5))
-                * (Mat4::IDENTITY.mul_scalar(0.0625));
-
+                * (Mat4::from_scale(Vec3::ONE * 0.0625));
             let uvlock = model.uvlock;
             let model = model.model;
             baked_model.ambient_occlusion = baked_model.ambient_occlusion && model.ambient_occlusion;
@@ -323,11 +322,11 @@ impl WorldRenderer {
                 };
                 if element.rotation.rescale {
                     let scale = if element.rotation.angle.abs() == 22.5 {
-                        f32::FRAC_PI_8().cos().recip() - 1.0
+                        f32::FRAC_PI_8().cos().recip()
                     } else {
-                        f32::FRAC_PI_4().cos().recip() - 1.0
+                        f32::SQRT_2()
                     };
-                    element_transform *= Mat4::from_scale(Vec3::new(scale, scale, scale));
+                    element_transform *= Mat4::from_scale(Vec3::new(scale, 1.0, scale));
                 }
                 element_transform = Mat4::from_translation(element.rotation.origin)
                     * element_transform
@@ -348,15 +347,21 @@ impl WorldRenderer {
                             geom::Direction::NegZ => (16.0 - element.to.x, 16.0 - element.to.y, 16.0 - element.from.x, 16.0 - element.from.y),
                         }
                     };
-                    let (u1, v1, u2, v2) = if uvlock {
-                        let uvlock_transform = Mat4::from_quat(Quat::from_rotation_arc(dir.forward().to_float(), Vec3::Z))
-                            * model_transform
-                            * Mat4::from_quat(Quat::from_rotation_arc(Vec3::Z, dir.forward().to_float()));
-                        let trans_uv = uvlock_transform.transform_point3(Vec3::new(u1, v1, 0.0));
-                        let (trans_u1, trans_v1) = (trans_uv.x, trans_uv.y);
-                        let trans_uv = model_transform.transform_point3(Vec3::new(u2, v2, 0.0));
-                        let (trans_u2, trans_v2) = (trans_uv.x, trans_uv.y);
+                    let (u1, v1, u2, v2) = if uvlock && dir.transform(&model_transform) == dir {
+                        let uvlock_transform =
+                            Mat4::from_translation(Vec3::new(0.5, 0.5, 0.5))
+                                * Mat4::from_quat(Quat::from_rotation_arc(dir.forward().to_float(), Vec3::Y))
+                                * Mat4::from_translation(Vec3::new(-0.5, -0.5, -0.5))
+                                * model_transform
+                                * Mat4::from_translation(Vec3::new(8.0, 8.0, 8.0))
+                                * Mat4::from_quat(Quat::from_rotation_arc(Vec3::Y, dir.forward().to_float()))
+                                * Mat4::from_translation(Vec3::new(-8.0, -8.0, -8.0));
+                        let trans_uv = uvlock_transform.transform_point3(Vec3::new(u1, 0.0, v1));
+                        let (trans_u1, trans_v1) = (trans_uv.x, trans_uv.z);
+                        let trans_uv = model_transform.transform_point3(Vec3::new(u2, 0.0, v2));
+                        let (trans_u2, trans_v2) = (trans_uv.x, trans_uv.z);
                         fn zero_safe_signum(n: f32) -> f32 {
+                            // because rust is stupid
                             if n == 0.0 {
                                 n
                             } else {
