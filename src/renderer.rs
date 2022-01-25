@@ -266,7 +266,7 @@ impl WorldRenderer {
                     ],
                     tex_coords: vertex.tex_coords,
                     lightmap_coords: [1.0, 0.0],
-                    color: (color.as_vec3() / 255.0).to_array(),
+                    color: if vertex.tint { (color.as_vec3() / 255.0).to_array() } else { [1.0, 1.0, 1.0] },
                 });
             }
             for i in &face.indices {
@@ -419,19 +419,23 @@ impl WorldRenderer {
                     };
                     dest_face.vertices.push(BakedModelVertex {
                         position: element_transform.transform_point3(vert1).to_array(),
-                        tex_coords: [u1, v2]
+                        tex_coords: [u1, v2],
+                        tint: face.tint_index != -1,
                     });
                     dest_face.vertices.push(BakedModelVertex {
                         position: element_transform.transform_point3(vert2).to_array(),
-                        tex_coords: [u2, v2]
+                        tex_coords: [u2, v2],
+                        tint: face.tint_index != -1,
                     });
                     dest_face.vertices.push(BakedModelVertex {
                         position: element_transform.transform_point3(vert3).to_array(),
-                        tex_coords: [u2, v1]
+                        tex_coords: [u2, v1],
+                        tint: face.tint_index != -1,
                     });
                     dest_face.vertices.push(BakedModelVertex {
                         position: element_transform.transform_point3(vert4).to_array(),
-                        tex_coords: [u1, v1]
+                        tex_coords: [u1, v1],
+                        tint: face.tint_index != -1,
                     });
                     dest_face.indices.push(index);
                     dest_face.indices.push(index + 1);
@@ -460,18 +464,22 @@ impl WorldRenderer {
                     BakedModelVertex {
                         position: [0.0, 0.0, 0.0],
                         tex_coords: [u1, v1],
+                        tint: false,
                     },
                     BakedModelVertex {
                         position: [0.0, 1.0, 0.0],
                         tex_coords: [u1, v2],
+                        tint: false,
                     },
                     BakedModelVertex {
                         position: [1.0, 1.0, 0.0],
                         tex_coords: [u2, v2],
+                        tint: false,
                     },
                     BakedModelVertex {
                         position: [1.0, 0.0, 0.0],
                         tex_coords: [u2, v1],
+                        tint: false,
                     },
                 ],
                 indices: vec![0, 1, 2, 2, 3, 0],
@@ -482,18 +490,22 @@ impl WorldRenderer {
                     BakedModelVertex {
                         position: [0.0, 0.0, 1.0],
                         tex_coords: [u1, v1],
+                        tint: false,
                     },
                     BakedModelVertex {
                         position: [1.0, 0.0, 1.0],
                         tex_coords: [u2, v1],
+                        tint: false,
                     },
                     BakedModelVertex {
                         position: [1.0, 1.0, 1.0],
                         tex_coords: [u2, v2],
+                        tint: false,
                     },
                     BakedModelVertex {
                         position: [0.0, 1.0, 1.0],
                         tex_coords: [u1, v2],
+                        tint: false,
                     },
                 ],
                 indices: vec![0, 1, 2, 2, 3, 0],
@@ -504,18 +516,22 @@ impl WorldRenderer {
                     BakedModelVertex {
                         position: [1.0, 0.0, 0.0],
                         tex_coords: [u1, v1],
+                        tint: false,
                     },
                     BakedModelVertex {
                         position: [1.0, 1.0, 0.0],
                         tex_coords: [u1, v2],
+                        tint: false,
                     },
                     BakedModelVertex {
                         position: [1.0, 1.0, 1.0],
                         tex_coords: [u2, v2],
+                        tint: false,
                     },
                     BakedModelVertex {
                         position: [1.0, 0.0, 1.0],
                         tex_coords: [u2, v1],
+                        tint: false,
                     },
                 ],
                 indices: vec![0, 1, 2, 2, 3, 0],
@@ -526,18 +542,22 @@ impl WorldRenderer {
                     BakedModelVertex {
                         position: [0.0, 0.0, 1.0],
                         tex_coords: [u1, v1],
+                        tint: false,
                     },
                     BakedModelVertex {
                         position: [0.0, 1.0, 1.0],
                         tex_coords: [u1, v2],
+                        tint: false,
                     },
                     BakedModelVertex {
                         position: [0.0, 1.0, 0.0],
                         tex_coords: [u2, v2],
+                        tint: false,
                     },
                     BakedModelVertex {
                         position: [0.0, 0.0, 0.0],
                         tex_coords: [u2, v1],
+                        tint: false,
                     },
                 ],
                 indices: vec![0, 1, 2, 2, 3, 0],
@@ -548,18 +568,22 @@ impl WorldRenderer {
                     BakedModelVertex {
                         position: [0.0, 0.0, 0.0],
                         tex_coords: [u1, v1],
+                        tint: false,
                     },
                     BakedModelVertex {
                         position: [1.0, 0.0, 0.0],
                         tex_coords: [u2, v1],
+                        tint: false,
                     },
                     BakedModelVertex {
                         position: [1.0, 0.0, 1.0],
                         tex_coords: [u2, v2],
+                        tint: false,
                     },
                     BakedModelVertex {
                         position: [0.0, 0.0, 1.0],
                         tex_coords: [u1, v2],
+                        tint: false,
                     },
                 ],
                 indices: vec![0, 1, 2, 2, 3, 0],
@@ -570,18 +594,22 @@ impl WorldRenderer {
                     BakedModelVertex {
                         position: [0.0, 1.0, 1.0],
                         tex_coords: [u1, v1],
+                        tint: false,
                     },
                     BakedModelVertex {
                         position: [1.0, 1.0, 1.0],
                         tex_coords: [u1, v2],
+                        tint: false,
                     },
                     BakedModelVertex {
                         position: [1.0, 1.0, 0.0],
                         tex_coords: [u2, v2],
+                        tint: false,
                     },
                     BakedModelVertex {
                         position: [0.0, 1.0, 0.0],
                         tex_coords: [u2, v1],
+                        tint: false,
                     },
                 ],
                 indices: vec![0, 1, 2, 2, 3, 0],
@@ -608,6 +636,7 @@ struct BakedModelFace {
 struct BakedModelVertex {
     position: [f32; 3],
     tex_coords: [f32; 2],
+    tint: bool,
 }
 
 #[derive(Clone, Copy, Default)]
