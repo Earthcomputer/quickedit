@@ -15,8 +15,9 @@ pub struct Vertex {
     pub position: [f32; 3],
     pub tex_coords: [f32; 2],
     pub lightmap_coords: [f32; 2],
+    pub color: [f32; 3],
 }
-implement_vertex!(Vertex, position, tex_coords, lightmap_coords);
+implement_vertex!(Vertex, position, tex_coords, lightmap_coords, color);
 
 #[derive(Debug, Clone, PartialEq, Eq, Hash, DeserializeFromStr)]
 pub struct ResourceLocation {

@@ -5,6 +5,7 @@ use std::iter::FilterMap;
 use std::ops::Deref;
 use std::path::{Path, PathBuf};
 use ahash::{AHashMap, AHashSet};
+use glam::Vec4Swizzles;
 use image::{GenericImage, GenericImageView};
 use lazy_static::lazy_static;
 use path_slash::{PathBufExt, PathExt};
@@ -144,6 +145,10 @@ pub struct Resources {
     blockstates: AHashMap<FName, BlockstateFile>,
     block_models: AHashMap<FName, BlockModel>,
     pub block_atlas: TextureAtlas,
+
+    biomes: AHashMap<FName, minecraft::BiomeData>,
+    grass_colormap: Option<image::RgbaImage>,
+    foliage_colormap: Option<image::RgbaImage>,
 }
 
 trait ResourcePack {
@@ -535,6 +540,35 @@ impl Resources {
         Ok(None)
     }
 
+    fn load_colormap(resource_packs: &mut [Box<dyn ResourcePack>], typ: &str) -> Option<image::RgbaImage> {
+        match Resources::get_resource(resource_packs, format!("assets/minecraft/textures/colormap/{}.png", typ).as_str()) {
+            Ok(Some(mut reader)) => {
+                let mut image_data = Vec::new();
+                if reader.read_to_end(&mut image_data).is_err() {
+                    eprintln!("Error reading {} colormap", typ);
+                } else {
+                    match image::load_from_memory_with_format(&image_data, image::ImageFormat::Png) {
+                        Ok(image) => return Some(image.to_rgba8()),
+                        Err(e) => eprintln!("Error loading {} colormap: {}", typ, e),
+                    }
+                }
+            }
+            Ok(None) => eprintln!("Error loading {} colormap", typ),
+            Err(e) => eprintln!("Error loading {} colormap: {}", typ, e)
+        }
+        None
+    }
+
+    fn load_data(mc_version: &str, resource_packs: &mut [Box<dyn ResourcePack>], resources: &mut Resources) {
+        match minecraft::get_biome_data(mc_version) {
+            Ok(biome_data) => resources.biomes = biome_data,
+            Err(e) => eprintln!("Error loading biome data: {}", e)
+        }
+
+        resources.grass_colormap = Resources::load_colormap(resource_packs, "grass");
+        resources.foliage_colormap = Resources::load_colormap(resource_packs, "foliage");
+    }
+
     pub fn load(mc_version: &str, resource_packs: &[&PathBuf], interaction_handler: &mut dyn minecraft::DownloadInteractionHandler) -> Option<Resources> {
         let mut resources = Resources::default();
         let mut resource_pack_list: Vec<Box<dyn ResourcePack>> = vec![Box::new(BuiltinResourcePack{})];
@@ -570,6 +604,8 @@ impl Resources {
             Resources::load_resource_pack(mc_version, &mut **pack, &mut resources);
         }
         Resources::load_resources(mc_version, &mut resource_pack_list, &mut resources);
+
+        Resources::load_data(mc_version, &mut resource_pack_list, &mut resources);
 
         Some(resources)
     }
@@ -631,6 +667,28 @@ impl Resources {
             transformed_models.push(transformed_model);
         }
         Some(transformed_models)
+    }
+
+    pub fn get_biome_data(&self, biome: &FName) -> Option<&minecraft::BiomeData> {
+        self.biomes.get(biome)
+    }
+
+    fn get_from_colormap(colormap: &Option<image::RgbaImage>, x: u32, y: u32) -> Option<glam::IVec3> {
+        colormap.as_ref().and_then(|colormap| {
+            if x >= colormap.width() || y >= colormap.height() {
+                None
+            } else {
+                Some(glam::IVec4::from(colormap.get_pixel(x, y).0.map(|i| i as i32)).xyz())
+            }
+        })
+    }
+
+    pub fn get_grass_color(&self, x: u32, y: u32) -> Option<glam::IVec3> {
+        Resources::get_from_colormap(&self.grass_colormap, x, y)
+    }
+
+    pub fn get_foliage_color(&self, x: u32, y: u32) -> Option<glam::IVec3> {
+        Resources::get_from_colormap(&self.foliage_colormap, x, y)
     }
 }
 

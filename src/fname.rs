@@ -50,6 +50,21 @@ common_fnames! {
     SAND = "sand";
     GRAVEL = "gravel";
 
+    // common states
+    HALF = "half";
+    UPPER = "upper";
+    VARIANT = "variant";
+    OAK = "oak";
+    SPRUCE = "spruce";
+    BIRCH = "birch";
+    JUNGLE = "jungle";
+    AGE = "age";
+    LEVEL = "level";
+    ZERO = "0";
+    POWER = "power";
+    SNOWY = "snowy";
+    TRUE = "true";
+
     // textures
     MISSINGNO = "missingno";
 }

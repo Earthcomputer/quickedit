@@ -1,4 +1,5 @@
 use std::{fs, io, sync};
+use std::any::Any;
 use std::io::{BufRead, Write, Cursor};
 use std::path::PathBuf;
 use ahash::AHashMap;
@@ -8,6 +9,8 @@ use sha1::{Sha1, Digest};
 use crate::util::{FastDashMap, make_fast_dash_map};
 use serde::Deserialize;
 use sha1::digest::generic_array::functional::FunctionalSequence;
+use crate::fname;
+use crate::fname::FName;
 
 // ===== Getting the Minecraft jar ===== //
 
@@ -72,19 +75,23 @@ fn find_existing_downloaded_jar(version: &str) -> Option<PathBuf> {
 }
 
 lazy_static! {
-    static ref HAS_DOWNLOADED: FastDashMap<String, ()> = make_fast_dash_map();
+    static ref DOWNLOAD_CACHE: FastDashMap<String, Box<dyn Any + Sync + Send>> = make_fast_dash_map();
 }
 
 const VERSION_MANIFEST_FILE: &str = "version_manifest.json";
 const VERSION_MANIFEST_URL: &str = "https://launchermeta.mojang.com/mc/game/version_manifest.json";
 
-fn download_if_changed<'a, T, U: 'a + ?Sized>(filename: &str, url: &U, force: bool) -> Result<T, io::Error>
+fn download_if_changed<'a, T, U: 'a + ?Sized>(filename: &str, url: &U, force: bool) -> io::Result<T>
 where
-    T: serde::de::DeserializeOwned,
+    T: serde::de::DeserializeOwned + Clone + Sync + Send + Any,
     U: AsRef<str>,
 {
-    if HAS_DOWNLOADED.contains_key(filename) && !force {
-        return Ok(serde_json::from_reader(fs::File::open(filename)?)?);
+    if !force {
+        if let Some(data) = DOWNLOAD_CACHE.get(filename) {
+            unsafe {
+                return Ok(data.downcast_ref_unchecked::<T>().clone());
+            }
+        }
     }
 
     let minecraft_cache = get_minecraft_cache();
@@ -107,11 +114,11 @@ where
         }
         serde_json::from_str(&text).map_err(|e| io::Error::new(io::ErrorKind::Other, e))
     } else {
-        let result = fs::File::open(path)
+        let result: io::Result<T> = fs::File::open(path)
             .and_then(|f| serde_json::from_reader(f).map_err(|e| io::Error::new(io::ErrorKind::Other, e)));
         match result {
             Ok(result) => {
-                HAS_DOWNLOADED.insert(filename.to_string(), ());
+                DOWNLOAD_CACHE.insert(filename.to_string(), Box::new(result.clone()));
                 Ok(result)
             }
             Err(e) => {
@@ -178,19 +185,19 @@ pub trait DownloadInteractionHandler {
     fn on_finish_download(&mut self);
 }
 
-#[derive(Deserialize)]
+#[derive(Clone, Deserialize)]
 struct VersionManifest {
     latest: LatestVersion,
     versions: Vec<Version>,
 }
 
-#[derive(Deserialize)]
+#[derive(Clone, Deserialize)]
 struct LatestVersion {
     release: String,
     snapshot: String,
 }
 
-#[derive(Deserialize)]
+#[derive(Clone, Deserialize)]
 struct Version {
     id: String,
     #[serde(rename = "type")]
@@ -200,21 +207,87 @@ struct Version {
     release_time: chrono::DateTime<chrono::Utc>,
 }
 
-#[derive(Deserialize)]
+#[derive(Clone, Deserialize)]
 struct VersionJson {
     downloads: Downloads
 }
 
-#[derive(Deserialize)]
+#[derive(Clone, Deserialize)]
 struct Downloads {
     client: Download,
 }
 
-#[derive(Deserialize)]
+#[derive(Clone, Deserialize)]
 struct Download {
     sha1: String,
     size: u64,
     url: String,
+}
+
+// ===== Prismarine data ===== //
+
+const PRISMARINE_URL_PREFIX: &str = "https://raw.githubusercontent.com/PrismarineJS/minecraft-data/master/data/";
+fn prismarine_url(suffix: &str) -> String {
+    format!("{}{}", PRISMARINE_URL_PREFIX, suffix)
+}
+
+fn get_prismarine_version_data(mc_version: &str) -> io::Result<PrismarineVersionData> {
+    let data_paths: PrismarineData = download_if_changed("dataPaths.json", prismarine_url("dataPaths.json").as_str(), false)?;
+    let mc_version = if data_paths.pc.contains_key(mc_version) {
+        mc_version.to_string()
+    } else {
+        let mut version_manifest: VersionManifest = download_if_changed(
+            VERSION_MANIFEST_FILE,
+            VERSION_MANIFEST_URL,
+            false,
+        )?;
+        version_manifest.versions.sort_by_key(|version| version.release_time);
+        let index = version_manifest.versions.iter()
+            .position(|version| version.id == mc_version)
+            .ok_or_else(|| io::Error::new(io::ErrorKind::Other, "Could not find version"))?;
+        let version = version_manifest.versions.iter().skip(index).find(|version| data_paths.pc.contains_key(version.id.as_str()))
+            .or_else(|| version_manifest.versions.iter().take(index).rev().find(|version| data_paths.pc.contains_key(version.id.as_str())))
+            .ok_or_else(|| io::Error::new(io::ErrorKind::Other, "Could not find version"))?;
+        version.id.clone()
+    };
+    Ok(data_paths.pc.get(mc_version.as_str()).unwrap().clone())
+}
+
+pub fn get_biome_data(mc_version: &str) -> io::Result<AHashMap<FName, BiomeData>> {
+    let version_data = get_prismarine_version_data(mc_version)?;
+    let biome_data_location = version_data.biomes.ok_or_else(|| io::Error::new(io::ErrorKind::Other, "No biome data"))?;
+    let biome_data_url = format!("{}/biomes.json", prismarine_url(&biome_data_location));
+    let biome_data: Vec<BiomeData> = download_if_changed(format!("biomes_{}.json", biome_data_location).as_str(), biome_data_url.as_str(), false)?;
+    let mut biome_data_map = AHashMap::new();
+    for data in biome_data {
+        biome_data_map.insert(fname::from_str(&data.name), data);
+    }
+    Ok(biome_data_map)
+}
+
+#[derive(Clone, Deserialize)]
+struct PrismarineData {
+    pc: AHashMap<String, PrismarineVersionData>,
+}
+
+#[derive(Clone, Deserialize)]
+struct PrismarineVersionData {
+    blocks: Option<String>,
+    biomes: Option<String>,
+}
+
+#[derive(Clone, Deserialize)]
+pub struct BiomeData {
+    name: String,
+    pub temperature: f64,
+    pub rainfall: f64,
+    #[serde(rename = "displayName")]
+    pub display_name: String,
+    #[serde(rename = "color")]
+    pub sky_color: i32,
+    pub grass_color: Option<i32>,
+    pub foliage_color: Option<i32>,
+    pub water_color: Option<i32>,
 }
 
 // ===== Getting the Minecraft version from the world version ===== //
@@ -493,12 +566,12 @@ pub fn get_minecraft_version(world_version: u32) -> Option<String> {
     }
 }
 
-#[derive(Deserialize)]
+#[derive(Clone, Deserialize)]
 struct BurgerJson {
     version: BurgerVersion,
 }
 
-#[derive(Deserialize)]
+#[derive(Clone, Deserialize)]
 struct BurgerVersion {
     data: u32,
 }

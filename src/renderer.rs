@@ -2,7 +2,7 @@ use ahash::AHashMap;
 use glam::{Mat4, Quat, Vec3, Vec3Swizzles, Vec4};
 use glium::{Surface, uniform};
 use num_traits::FloatConst;
-use crate::{CommonFNames, geom, make_a_hash_map, util};
+use crate::{blocks, CommonFNames, geom, make_a_hash_map, util};
 use crate::geom::{BlockPos, DVec3Extensions, IVec3Extensions, IVec3RangeExtensions};
 use crate::resources::{Resources, TextureAtlas};
 use crate::util::{FastDashMap, Lerp, make_fast_dash_map};
@@ -223,11 +223,11 @@ impl WorldRenderer {
         }
     }
 
-    fn render_subchunk(&self, world: &World, _dimension: &Dimension, subchunk: &Subchunk, subchunk_pos: BlockPos) -> BakedChunkGeometry {
+    fn render_subchunk(&self, world: &World, dimension: &Dimension, subchunk: &Subchunk, subchunk_pos: BlockPos) -> BakedChunkGeometry {
         let mut chunk_geom = ChunkGeometry::default();
         for pos in (BlockPos::new(0, 0, 0)..BlockPos::new(16, 16, 16)).iter() {
             let block_state = subchunk.get_block_state(pos);
-            self.render_state(world, block_state, subchunk_pos * 16 + pos, &mut chunk_geom);
+            self.render_state(world, dimension, block_state, subchunk_pos * 16 + pos, &mut chunk_geom);
         }
 
         // upload to gpu
@@ -247,7 +247,8 @@ impl WorldRenderer {
         }
     }
 
-    fn render_state(&self, world: &World, state: &IBlockState, pos: BlockPos, out_geometry: &mut ChunkGeometry) {
+    fn render_state(&self, world: &World, dimension: &Dimension, state: &IBlockState, pos: BlockPos, out_geometry: &mut ChunkGeometry) {
+        let color = blocks::get_block_color(world, dimension, pos, state);
         let baked_model = self.get_baked_model(world, state);
         for (_dir, face) in &baked_model.faces {
             let geom = match face.transparency {
@@ -265,6 +266,7 @@ impl WorldRenderer {
                     ],
                     tex_coords: vertex.tex_coords,
                     lightmap_coords: [1.0, 0.0],
+                    color: (color.as_vec3() / 255.0).to_array(),
                 });
             }
             for i in &face.indices {

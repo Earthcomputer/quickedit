@@ -1,4 +1,3 @@
-use std::collections::HashMap;
 use std::{fs, io, mem};
 use std::borrow::{Borrow, BorrowMut};
 use std::cell::RefCell;
@@ -8,9 +7,11 @@ use std::io::Cursor;
 use std::mem::MaybeUninit;
 use std::path::PathBuf;
 use std::sync::{Arc, RwLock};
+use ahash::AHashMap;
 use serde::Deserialize;
 use byteorder::{BigEndian, ReadBytesExt};
 use dashmap::mapref::entry::Entry;
+use glam::Vec3Swizzles;
 use internment::ArcIntern;
 use lazy_static::lazy_static;
 use num_integer::Integer;
@@ -29,7 +30,7 @@ lazy_static! {
 #[derive(Debug, Clone, PartialEq, Eq)]
 pub struct BlockState {
     pub block: FName,
-    pub properties: HashMap<FName, FName>,
+    pub properties: AHashMap<FName, FName>,
 }
 
 #[allow(clippy::derive_hash_xor_eq)]
@@ -53,7 +54,7 @@ impl BlockState {
     pub fn new(block: &FName) -> Self {
         BlockState {
             block: block.clone(),
-            properties: HashMap::new(),
+            properties: AHashMap::new(),
         }
     }
 }
@@ -64,7 +65,7 @@ macro_rules! define_paletted_data {
             entries_per_long: u8,
             bits_per_block: u8,
             palette: Vec<$type>,
-            inv_palette: HashMap<$type, usize>,
+            inv_palette: AHashMap<$type, usize>,
             data: Vec<u64>,
         }
 
@@ -76,15 +77,20 @@ macro_rules! define_paletted_data {
                     bits_per_block,
                     entries_per_long,
                     palette: Vec::with_capacity($default_palette_size),
-                    inv_palette: HashMap::new(),
+                    inv_palette: AHashMap::new(),
                     data: Vec::with_capacity(((1_usize << $h_bits) * (1_usize << $h_bits) * (1_usize << $v_bits)).div_ceil(entries_per_long as usize)),
                 }
             }
 
             fn direct_init(palette: Vec<$type>, data: Vec<u64>) -> Self {
-                let bits_per_block = (((palette.len() - 1).log2() + 1) as u8).max($default_palette_size.log2() as u8);
-                let entries_per_long = 64_u8 / bits_per_block;
-                let mut inv_palette = HashMap::new();
+                let (bits_per_block, entries_per_long) = if data.is_empty() {
+                    (0, 0)
+                } else {
+                    let bits_per_block = (((palette.len() - 1).log2() + 1) as u8).max($default_palette_size.log2() as u8);
+                    let entries_per_long = 64_u8 / bits_per_block;
+                    (bits_per_block, entries_per_long)
+                };
+                let mut inv_palette = AHashMap::new();
                 for (i, v) in palette.iter().enumerate() {
                     inv_palette.insert(v.clone(), i);
                 }
@@ -98,6 +104,9 @@ macro_rules! define_paletted_data {
             }
 
             fn get(&self, x: usize, y: usize, z: usize) -> &$type {
+                if self.data.is_empty() {
+                    return &self.palette[0];
+                }
                 let index = y << ($h_bits + $h_bits) | z << $h_bits | x;
                 let (bit, inbit) = index.div_mod_floor(&(self.entries_per_long as usize));
                 return &self.palette[((self.data[bit] >> (inbit * self.bits_per_block as usize)) & ((1 << self.bits_per_block) - 1)) as usize];
@@ -122,6 +131,12 @@ macro_rules! define_paletted_data {
             }
 
             fn resize(&mut self) {
+                if self.data.is_empty() {
+                    self.bits_per_block = $default_palette_size.log2() as u8;
+                    self.entries_per_long = 64_u8 / self.bits_per_block;
+                    self.data = vec![0; ((1_usize << $h_bits) * (1_usize << $h_bits) * (1_usize << $v_bits)).div_ceil(self.entries_per_long as usize)];
+                    return;
+                }
                 let old_data_size = ((1 << $h_bits) * (1 << $h_bits) * (1 << $v_bits)).div_ceil(&(self.entries_per_long as usize));
                 let old_bits_per_block = self.bits_per_block;
                 let old_entries_per_long = self.entries_per_long;
@@ -167,6 +182,14 @@ impl Subchunk {
     pub fn set_block_state(&mut self, pos: BlockPos, value: &IBlockState) {
         self.block_data.set(pos.x as usize, pos.y as usize, pos.z as usize, value);
     }
+
+    pub fn get_biome(&self, pos: BlockPos) -> &FName {
+        self.biome_data.get(pos.x as usize >> 2, pos.y as usize >> 2, pos.z as usize >> 2)
+    }
+
+    pub fn set_biome(&mut self, pos: BlockPos, value: &FName) {
+        self.biome_data.set(pos.x as usize >> 2, pos.y as usize >> 2, pos.z as usize >> 2, value);
+    }
 }
 
 pub struct Chunk {
@@ -178,6 +201,32 @@ impl Chunk {
         Chunk {
             subchunks: Vec::new(),
         }
+    }
+
+    pub fn get_block_state(&self, dimension: &Dimension, pos: BlockPos) -> Option<IBlockState> {
+        let subchunk_index = (pos.y - dimension.min_y) >> 4;
+        if subchunk_index < 0 {
+            return None;
+        }
+        let subchunk_index = subchunk_index as usize;
+        if subchunk_index >= self.subchunks.len() {
+            return None;
+        }
+        let subchunk = self.subchunks[subchunk_index].as_ref()?;
+        Some(subchunk.get_block_state(pos & glam::IVec3::new(!0, 15, !0)).clone())
+    }
+
+    pub fn get_biome(&self, dimension: &Dimension, pos: BlockPos) -> Option<FName> {
+        let subchunk_index = (pos.y - dimension.min_y) >> 4;
+        if subchunk_index < 0 {
+            return None;
+        }
+        let subchunk_index = subchunk_index as usize;
+        if subchunk_index >= self.subchunks.len() {
+            return None;
+        }
+        let subchunk = self.subchunks[subchunk_index].as_ref()?;
+        Some(subchunk.get_biome(pos & glam::IVec3::new(!0, 15, !0)).clone())
     }
 }
 
@@ -208,6 +257,16 @@ impl Dimension {
         } else {
             world.path.join("dimensions").join(self.id.namespace.clone()).join(self.id.name.clone())
         }
+    }
+
+    pub fn get_block_state(&self, pos: BlockPos) -> Option<IBlockState> {
+        let chunk = self.get_chunk(pos.xz() >> glam::IVec2::new(4, 4))?;
+        chunk.get_block_state(self, pos & glam::IVec3::new(15, !0, 15))
+    }
+
+    pub fn get_biome(&self, pos: BlockPos) -> Option<FName> {
+        let chunk = self.get_chunk(pos.xz() >> glam::IVec2::new(4, 4))?;
+        chunk.get_biome(self, pos & glam::IVec3::new(15, !0, 15))
     }
 
     pub fn get_chunk(&self, pos: ChunkPos) -> Option<Arc<Chunk>> {
@@ -271,29 +330,11 @@ impl Dimension {
             'sections:
             for section in sections.iter().take(((self.max_y - self.min_y) / 16) as usize) {
                 if let nbt::Value::Compound(section_map) = section {
-                    let mut data = Vec::new();
-                    let mut palette = Vec::new();
+                    let mut block_data = Vec::new();
+                    let mut block_palette = Vec::new();
                     if let Some(nbt::Value::Compound(block_states)) = section_map.get("block_states") {
-                        if let Some(nbt::Value::List(nbt_data)) = block_states.get("data") {
-                            data.reserve(nbt_data.len());
-                            for data_elem in nbt_data {
-                                match data_elem {
-                                    nbt::Value::Byte(b) => data.push(*b as u8 as u64),
-                                    nbt::Value::Short(s) => data.push(*s as u16 as u64),
-                                    nbt::Value::Int(i) => data.push(*i as u32 as u64),
-                                    nbt::Value::Long(l) => data.push(*l as u64),
-                                    _ => {
-                                        chunk.subchunks.push(None);
-                                        continue 'sections
-                                    }
-                                }
-                            }
-                        } else {
-                            chunk.subchunks.push(None);
-                            continue 'sections
-                        }
                         if let Some(nbt::Value::List(palette_list)) = block_states.get("palette") {
-                            palette.reserve(palette_list.len());
+                            block_palette.reserve(palette_list.len());
                             for palette_elem in palette_list {
                                 match palette_elem {
                                     nbt::Value::Compound(palette_map) => {
@@ -319,7 +360,7 @@ impl Dimension {
                                                     continue 'sections
                                                 }
                                             }
-                                            palette.push(IBlockState::new(block_state));
+                                            block_palette.push(IBlockState::new(block_state));
                                         } else {
                                             chunk.subchunks.push(None);
                                             continue 'sections
@@ -335,14 +376,73 @@ impl Dimension {
                             chunk.subchunks.push(None);
                             continue 'sections
                         }
+                        if let Some(nbt::Value::List(nbt_data)) = block_states.get("data") {
+                            block_data.reserve(nbt_data.len());
+                            for data_elem in nbt_data {
+                                match data_elem {
+                                    nbt::Value::Byte(b) => block_data.push(*b as u8 as u64),
+                                    nbt::Value::Short(s) => block_data.push(*s as u16 as u64),
+                                    nbt::Value::Int(i) => block_data.push(*i as u32 as u64),
+                                    nbt::Value::Long(l) => block_data.push(*l as u64),
+                                    _ => {
+                                        chunk.subchunks.push(None);
+                                        continue 'sections
+                                    }
+                                }
+                            }
+                        } else if block_palette.len() != 1 {
+                            chunk.subchunks.push(None);
+                            continue 'sections
+                        }
+                    } else {
+                        chunk.subchunks.push(None);
+                        continue 'sections
+                    }
+
+                    let mut biome_data = Vec::new();
+                    let mut biome_palette = Vec::new();
+                    if let Some(nbt::Value::Compound(biomes)) = section_map.get("biomes") {
+                        if let Some(nbt::Value::List(palette_list)) = biomes.get("palette") {
+                            biome_palette.reserve(palette_list.len());
+                            for palette_elem in palette_list {
+                                match palette_elem {
+                                    nbt::Value::String(s) => biome_palette.push(FName::new(s.parse().unwrap())),
+                                    _ => {
+                                        chunk.subchunks.push(None);
+                                        continue 'sections
+                                    }
+                                }
+                            }
+                        } else {
+                            chunk.subchunks.push(None);
+                            continue 'sections
+                        }
+                        if let Some(nbt::Value::List(nbt_data)) = biomes.get("data") {
+                            biome_data.reserve(nbt_data.len());
+                            for data_elem in nbt_data {
+                                match data_elem {
+                                    nbt::Value::Byte(b) => biome_data.push(*b as u8 as u64),
+                                    nbt::Value::Short(s) => biome_data.push(*s as u16 as u64),
+                                    nbt::Value::Int(i) => biome_data.push(*i as u32 as u64),
+                                    nbt::Value::Long(l) => biome_data.push(*l as u64),
+                                    _ => {
+                                        chunk.subchunks.push(None);
+                                        continue 'sections
+                                    }
+                                }
+                            }
+                        } else if biome_palette.len() != 1 {
+                            chunk.subchunks.push(None);
+                            continue 'sections
+                        }
                     } else {
                         chunk.subchunks.push(None);
                         continue 'sections
                     }
 
                     chunk.subchunks.push(Some(Subchunk {
-                        block_data: BlockData::direct_init(palette, data),
-                        biome_data: BiomeData::new(),
+                        block_data: BlockData::direct_init(block_palette, block_data),
+                        biome_data: BiomeData::direct_init(biome_palette, biome_data),
                         baked_geometry: RefCell::new(None),
                     }));
                 } else {

@@ -2,6 +2,7 @@
 
 in vec2 v_tex_coords;
 in vec2 v_lightmap_coords;
+in vec3 v_color;
 out vec4 color;
 
 uniform sampler2D tex;
@@ -41,5 +42,5 @@ void main() {
     block_color = mix(block_color, vec3(0.75, 0.75, 0.75), 0.04);
     block_color = clamp(block_color, vec3(0.0, 0.0, 0.0), vec3(1.0, 1.0, 1.0));
 
-    color = tex_color * vec4(block_color, 1.0);
+    color = tex_color * vec4(v_color, 1.0) * vec4(block_color, 1.0);
 }

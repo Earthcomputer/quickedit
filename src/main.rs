@@ -1,5 +1,6 @@
 #![feature(can_vector)]
 #![feature(derive_default_enum)]
+#![feature(downcast_unchecked)]
 #![feature(exact_size_is_empty)]
 #![feature(int_log)]
 #![feature(int_roundings)]
@@ -18,6 +19,7 @@ mod ui;
 mod renderer;
 mod resources;
 mod geom;
+mod blocks;
 
 extern crate conrod_core;
 extern crate conrod_glium;
