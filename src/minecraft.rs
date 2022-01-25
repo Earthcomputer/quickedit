@@ -257,7 +257,7 @@ pub fn get_biome_data(mc_version: &str) -> io::Result<AHashMap<FName, BiomeData>
     let version_data = get_prismarine_version_data(mc_version)?;
     let biome_data_location = version_data.biomes.ok_or_else(|| io::Error::new(io::ErrorKind::Other, "No biome data"))?;
     let biome_data_url = format!("{}/biomes.json", prismarine_url(&biome_data_location));
-    let biome_data: Vec<BiomeData> = download_if_changed(format!("biomes_{}.json", biome_data_location).as_str(), biome_data_url.as_str(), false)?;
+    let biome_data: Vec<BiomeData> = download_if_changed(format!("biomes_{}.json", biome_data_location.replace('/', "_")).as_str(), biome_data_url.as_str(), false)?;
     let mut biome_data_map = AHashMap::new();
     for data in biome_data {
         biome_data_map.insert(fname::from_str(&data.name), data);
