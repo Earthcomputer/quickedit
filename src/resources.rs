@@ -145,6 +145,7 @@ pub struct Resources {
     blockstates: AHashMap<FName, BlockstateFile>,
     block_models: AHashMap<FName, BlockModel>,
     pub block_atlas: TextureAtlas,
+    pub mipmap_levels: u32,
 
     biomes: AHashMap<FName, minecraft::BiomeData>,
     tint_data: AHashMap<FName, TintData>,
@@ -527,7 +528,8 @@ impl Resources {
 
         textures.insert(CommonFNames.MISSINGNO.clone(), image::load_from_memory_with_format(MISSINGNO_DATA, image::ImageFormat::Png).unwrap().to_rgba8());
 
-        resources.block_atlas = stitch(&textures, &mut 4, *MAX_SUPPORTED_TEXTURE_SIZE, *MAX_SUPPORTED_TEXTURE_SIZE).unwrap();
+        resources.mipmap_levels = 4;
+        resources.block_atlas = stitch(&textures, &mut resources.mipmap_levels, *MAX_SUPPORTED_TEXTURE_SIZE, *MAX_SUPPORTED_TEXTURE_SIZE).unwrap();
     }
 
     fn get_resource<'a>(resource_packs: &'a mut [Box<dyn ResourcePack>], path: &str) -> io::Result<Option<Box<dyn io::Read + 'a>>> {
@@ -1073,14 +1075,14 @@ pub struct Sprite {
 
 fn stitch<P: image::Pixel<Subpixel=u8> + 'static, I: image::GenericImageView<Pixel=P>>(
     textures: &AHashMap<FName, I>,
-    mipmap_level: &mut u8,
+    mipmap_level: &mut u32,
     max_width: u32,
     max_height: u32
 ) -> Option<TextureAtlas> {
     let mut textures: Vec<_> = textures.iter().collect();
     textures.sort_by_key(|&(_, texture)| (!texture.width(), !texture.height()));
     for (_, texture) in &textures {
-        *mipmap_level = (*mipmap_level).min(texture.width().trailing_zeros().min(texture.height().trailing_zeros()) as u8);
+        *mipmap_level = (*mipmap_level).min(texture.width().trailing_zeros().min(texture.height().trailing_zeros()));
     }
 
     struct Slot<'a, P: image::Pixel<Subpixel=u8>, I: image::GenericImageView<Pixel=P>> {
