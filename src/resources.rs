@@ -147,6 +147,7 @@ pub struct Resources {
     pub block_atlas: TextureAtlas,
 
     biomes: AHashMap<FName, minecraft::BiomeData>,
+    tint_data: AHashMap<FName, TintData>,
     grass_colormap: Option<image::RgbaImage>,
     foliage_colormap: Option<image::RgbaImage>,
 }
@@ -565,6 +566,27 @@ impl Resources {
             Err(e) => eprintln!("Error loading biome data: {}", e)
         }
 
+        match minecraft::get_tint_data(mc_version) {
+            Ok(tint_data) => {
+                for grass_data in tint_data.grass.data {
+                    for biome in grass_data.keys {
+                        resources.tint_data.entry(biome).or_default().grass = glam::IVec3::new((grass_data.color) >> 16 & 0xff, (grass_data.color >> 8) & 0xff, grass_data.color & 0xff);
+                    }
+                }
+                for foliage_data in tint_data.foliage.data {
+                    for biome in foliage_data.keys {
+                        resources.tint_data.entry(biome).or_default().foliage = glam::IVec3::new((foliage_data.color) >> 16 & 0xff, (foliage_data.color >> 8) & 0xff, foliage_data.color & 0xff);
+                    }
+                }
+                for water_data in tint_data.water.data {
+                    for biome in water_data.keys {
+                        resources.tint_data.entry(biome).or_default().water = glam::IVec3::new((water_data.color) >> 16 & 0xff, (water_data.color >> 8) & 0xff, water_data.color & 0xff);
+                    }
+                }
+            }
+            Err(e) => eprintln!("Error loading tint data: {}", e)
+        }
+
         resources.grass_colormap = Resources::load_colormap(resource_packs, "grass");
         resources.foliage_colormap = Resources::load_colormap(resource_packs, "foliage");
     }
@@ -671,6 +693,10 @@ impl Resources {
 
     pub fn get_biome_data(&self, biome: &FName) -> Option<&minecraft::BiomeData> {
         self.biomes.get(biome)
+    }
+
+    pub fn get_tint_data(&self, tint: &FName) -> Option<&TintData> {
+        self.tint_data.get(tint)
     }
 
     fn get_from_colormap(colormap: &Option<image::RgbaImage>, x: u32, y: u32) -> Option<glam::IVec3> {
@@ -1229,5 +1255,21 @@ fn calc_transparency<P: image::Pixel<Subpixel=u8>, I: image::GenericImageView<Pi
         renderer::Transparency::Transparent
     } else {
         renderer::Transparency::Opaque
+    }
+}
+
+pub struct TintData {
+    pub grass: glam::IVec3,
+    pub foliage: glam::IVec3,
+    pub water: glam::IVec3,
+}
+
+impl Default for TintData {
+    fn default() -> Self {
+        TintData {
+            grass: glam::IVec3::new(255, 255, 255),
+            foliage: glam::IVec3::new(255, 255, 255),
+            water: glam::IVec3::new(255, 255, 255),
+        }
     }
 }

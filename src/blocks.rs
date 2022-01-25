@@ -62,16 +62,16 @@ fn get_grass_color(world: &World, dimension: &Dimension, pos: BlockPos, _state: 
 }
 
 fn get_grass_color_with_default(world: &World, dimension: &Dimension, pos: BlockPos, default: glam::IVec3) -> glam::IVec3 {
-    let (temperature, rainfall) = if let Some(biome_data) =
-        dimension.get_biome(pos).and_then(|b| world.resources.get_biome_data(&b))
-    {
-        if let Some(grass_color) = biome_data.grass_color {
-            return glam::IVec3::new((grass_color >> 16) & 255, (grass_color >> 8) & 255, grass_color & 255);
+    let biome = dimension.get_biome(pos);
+    if let Some(biome) = &biome {
+        if let Some(tint_data) = world.resources.get_tint_data(biome) {
+            return tint_data.grass;
         }
-        (biome_data.temperature, biome_data.rainfall)
-    } else {
-        (0.5, 1.0)
-    };
+    }
+
+    let (temperature, rainfall) = biome
+        .and_then(|b| world.resources.get_biome_data(&b))
+        .map_or_else(|| (0.5, 1.0), |b| (b.temperature, b.rainfall));
     let temperature = temperature.clamp(0.0, 1.0);
     let rainfall = rainfall.clamp(0.0, 1.0);
     let humidity = temperature * rainfall;
@@ -89,11 +89,15 @@ fn get_birch_color(_world: &World, _dimension: &Dimension, _pos: BlockPos, _stat
 }
 
 fn get_foliage_color(world: &World, dimension: &Dimension, pos: BlockPos, _state: &IBlockState) -> glam::IVec3 {
-    if let Some(biome_data) = dimension.get_biome(pos).and_then(|b| world.resources.get_biome_data(&b))
-    {
-        if let Some(foliage_color) = biome_data.foliage_color {
-            return glam::IVec3::new((foliage_color >> 16) & 255, (foliage_color >> 8) & 255, foliage_color & 255);
+    let biome = dimension.get_biome(pos);
+    if let Some(biome) = &biome {
+        if let Some(tint_data) = world.resources.get_tint_data(biome) {
+            return tint_data.foliage;
         }
+    }
+
+    if let Some(biome_data) = biome.and_then(|b| world.resources.get_biome_data(&b))
+    {
         let temperature = biome_data.temperature.clamp(0.0, 1.0);
         let rainfall = biome_data.rainfall.clamp(0.0, 1.0);
         let humidity = temperature * rainfall;
@@ -118,11 +122,8 @@ fn get_112_leaves_color(world: &World, dimension: &Dimension, pos: BlockPos, sta
 
 fn get_water_color(world: &World, dimension: &Dimension, pos: BlockPos, _state: &IBlockState) -> glam::IVec3 {
     dimension.get_biome(pos)
-        .and_then(|biome| world.resources.get_biome_data(&biome))
-        .and_then(|biome_data| biome_data.water_color)
-        .map_or_else(|| glam::IVec3::new(0xff, 0xff, 0xff), |water_color| {
-            glam::IVec3::new((water_color >> 16) & 255, (water_color >> 8) & 255, water_color & 255)
-        })
+        .and_then(|biome| world.resources.get_tint_data(&biome))
+        .map_or_else(|| glam::IVec3::new(0xff, 0xff, 0xff), |tint_data| tint_data.water)
 }
 
 fn get_112_cauldron_color(world: &World, dimension: &Dimension, pos: BlockPos, state: &IBlockState) -> glam::IVec3 {

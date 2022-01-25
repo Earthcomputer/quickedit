@@ -265,6 +265,14 @@ pub fn get_biome_data(mc_version: &str) -> io::Result<AHashMap<FName, BiomeData>
     Ok(biome_data_map)
 }
 
+pub fn get_tint_data(mc_version: &str) -> io::Result<TintData> {
+    let version_data = get_prismarine_version_data(mc_version)?;
+    let tint_data_location = version_data.tints.ok_or_else(|| io::Error::new(io::ErrorKind::Other, "No tint data"))?;
+    let tint_data_url = format!("{}/tints.json", prismarine_url(&tint_data_location));
+    let tint_data: TintData = download_if_changed(format!("tints_{}.json", tint_data_location.replace('/', "_")).as_str(), tint_data_url.as_str(), false)?;
+    Ok(tint_data)
+}
+
 #[derive(Clone, Deserialize)]
 struct PrismarineData {
     pc: AHashMap<String, PrismarineVersionData>,
@@ -274,6 +282,7 @@ struct PrismarineData {
 struct PrismarineVersionData {
     blocks: Option<String>,
     biomes: Option<String>,
+    tints: Option<String>,
 }
 
 #[derive(Clone, Deserialize)]
@@ -285,9 +294,24 @@ pub struct BiomeData {
     pub display_name: String,
     #[serde(rename = "color")]
     pub sky_color: i32,
-    pub grass_color: Option<i32>,
-    pub foliage_color: Option<i32>,
-    pub water_color: Option<i32>,
+}
+
+#[derive(Clone, Deserialize)]
+pub struct TintData {
+    pub grass: TintDataData,
+    pub foliage: TintDataData,
+    pub water: TintDataData,
+}
+
+#[derive(Clone, Deserialize)]
+pub struct TintDataData {
+    pub data: Vec<TintDataEntry>,
+}
+
+#[derive(Clone, Deserialize)]
+pub struct TintDataEntry {
+    pub keys: Vec<FName>,
+    pub color: i32,
 }
 
 // ===== Getting the Minecraft version from the world version ===== //
