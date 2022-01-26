@@ -73,7 +73,7 @@ fn open_clicked() {
         }
         let worlds = world::WORLDS.read().unwrap();
         let dimension_cell = worlds.last().unwrap().unwrap().get_dimension(&CommonFNames.OVERWORLD).unwrap();
-        let mut dimension = dimension_cell.write().unwrap();
+        let dimension = dimension_cell.write().unwrap();
         dimension.load_chunk(worlds.last().unwrap().unwrap(), geom::ChunkPos::new(0, 0));
     }
 }

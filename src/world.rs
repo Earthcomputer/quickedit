@@ -1,4 +1,4 @@
-use std::{fmt, fs, io, mem};
+use std::{fmt, fs, io, mem, time};
 use std::borrow::{Borrow, BorrowMut};
 use std::cell::RefCell;
 use std::collections::btree_map::BTreeMap;
@@ -13,11 +13,11 @@ use ahash::AHashMap;
 use serde::{Deserialize, Serialize};
 use byteorder::{BigEndian, ReadBytesExt};
 use dashmap::mapref::entry::Entry;
-use glam::Vec3Swizzles;
+use glam::{IVec2, Vec3Swizzles};
 use internment::ArcIntern;
 use lazy_static::lazy_static;
 use num_integer::Integer;
-use positioned_io_preview::{RandomAccessFile, ReadAt};
+use positioned_io_preview::{RandomAccessFile, ReadAt, ReadBytesAtExt};
 use crate::fname::{CommonFNames, FName};
 use crate::{minecraft, renderer};
 use crate::geom::{BlockPos, ChunkPos};
@@ -247,6 +247,9 @@ pub struct Dimension {
     pub min_y: i32,
     pub max_y: i32,
     chunks: FastDashMap<ChunkPos, Arc<Chunk>>,
+
+    region_file_cache: FastDashMap<IVec2, (RandomAccessFile, time::SystemTime)>,
+    chunk_existence_cache: FastDashMap<IVec2, bool>,
 }
 
 impl Dimension {
@@ -256,6 +259,8 @@ impl Dimension {
             min_y: 0,
             max_y: 256,
             chunks: make_fast_dash_map(),
+            region_file_cache: make_fast_dash_map(),
+            chunk_existence_cache: make_fast_dash_map(),
         }
     }
 
@@ -282,58 +287,123 @@ impl Dimension {
     }
 
     pub fn get_chunk(&self, pos: ChunkPos) -> Option<Arc<Chunk>> {
-        match &self.chunks.entry(pos) {
-            Entry::Occupied(entry) => Some(entry.get().clone()),
-            Entry::Vacant(_) => None
-        }
+        self.chunks.view(&pos, |_, chunk| {
+            chunk.clone()
+        })
     }
 
-    pub fn load_chunk(&mut self, world: &World, pos: ChunkPos) {
-        let chunk = self.read_chunk(world, pos).unwrap();
-        self.chunks.insert(pos, Arc::new(chunk));
-    }
-
-    fn read_chunk(&self, world: &World, pos: ChunkPos) -> io::Result<Chunk> {
-        let save_dir = self.get_save_dir(world);
-        let region_path = save_dir.join("region").join(format!("r.{}.{}.mca", pos.x >> 5, pos.y >> 5));
-        let raf = RandomAccessFile::open(region_path)?;
-        #[allow(clippy::uninit_assumed_init)]
-        let mut sector_data: [u8; 4] = unsafe { MaybeUninit::uninit().assume_init() };
-        raf.read_exact_at((((pos.x & 31) | ((pos.y & 31) << 5)) << 2) as u64, &mut sector_data)?;
-        let offset = Cursor::new(sector_data).read_u24::<BigEndian>()? as u64 * 4096;
-        let size = sector_data[3] as usize * 4096;
-        if size < 5 {
-            return Err(io::Error::new(io::ErrorKind::InvalidData, "Chunk header is truncated"));
+    pub fn load_chunk(&self, world: &World, pos: ChunkPos) -> Option<Arc<Chunk>> {
+        if self.chunk_existence_cache.get(&pos).map(|b| *b) == Some(false) {
+            return None;
         }
-        let mut buffer = Vec::with_capacity(size);
-        #[allow(clippy::uninit_vec)]
-        unsafe { buffer.set_len(size); }
-        raf.read_exact_at(offset, &mut buffer)?;
-        let mut cursor = Cursor::new(&buffer);
-        let m = cursor.read_i32::<BigEndian>()?;
-        let b = cursor.read_u8()?;
-        if m == 0 {
-            return Err(io::Error::new(io::ErrorKind::InvalidData, "Chunk is allocated, but stream is missing"));
+        if let Some(chunk) = self.chunks.get(&pos) {
+            return Some(chunk.clone());
         }
-        if b & 128 != 0 {
-            if m != 1 {
-                return Err(io::Error::new(io::ErrorKind::InvalidData, "Chunk has both internal and external streams"));
+        self.chunks.entry(pos).or_try_insert_with(|| {
+            match self.read_chunk(world, pos)? {
+                Some(chunk) => Ok(Arc::new(chunk)),
+                None => Err(io::Error::new(io::ErrorKind::NotFound, "Chunk not found"))
             }
-            // TODO: read external chunks
-            return Err(io::Error::new(io::ErrorKind::InvalidData, "External chunk"));
+        }).map(|r| r.clone()).map_err(|err| {
+            if err.kind() != io::ErrorKind::NotFound {
+                eprintln!("Failed to load chunk: {}", err);
+            }
+        }).ok()
+    }
+
+    pub fn does_chunk_exist(&self, world: &World, pos: ChunkPos) -> bool {
+        if let Some(exists) = self.chunk_existence_cache.get(&pos) {
+            return *exists;
         }
-        if m < 0 {
-            return Err(io::Error::new(io::ErrorKind::InvalidData, format!("Declared size {} of chunk is negative", m)));
+
+        *self.chunk_existence_cache.entry(pos).or_insert_with(|| {
+            if self.chunks.contains_key(&pos) {
+                return true;
+            }
+            let region_file = match self.get_region_file(world, pos >> 5i8) {
+                Ok(file) => file,
+                Err(e) => {
+                    eprintln!("Failed to get region file: {}", e);
+                    return false;
+                }
+            };
+            match region_file.0.read_u32_at::<byteorder::NativeEndian>((((pos.x & 31) | ((pos.y & 31) << 5)) << 2) as u64) {
+                Ok(0) => false,
+                Ok(_) => true,
+                Err(e) => {
+                    eprintln!("Error checking existence of chunk: {}", e);
+                    false
+                }
+            }
+        })
+    }
+
+    fn get_region_file(&self, world: &World, region_pos: IVec2) -> io::Result<dashmap::mapref::one::RefMut<IVec2, (RandomAccessFile, time::SystemTime), ahash::RandomState>> {
+        if let Entry::Occupied(entry) = self.region_file_cache.entry(region_pos) {
+            return Ok(entry.into_ref());
         }
-        let n = (m - 1) as usize;
-        if n > size - 5 {
-            return Err(io::Error::new(io::ErrorKind::InvalidData, format!("Declared size {} of chunk is larger than actual size {}", n, size)));
+
+        let first_accessed_pos = self.region_file_cache.iter().min_by_key(|r| r.value().1).map(|r| *r.key());
+        if self.region_file_cache.len() >= 8 {
+            if let Some(first_accessed_pos) = first_accessed_pos {
+                self.region_file_cache.remove(&first_accessed_pos);
+            }
         }
-        let serialized_chunk: SerializedChunk = match b {
-            1 => nbt::from_gzip_reader(cursor)?,
-            2 => nbt::from_zlib_reader(cursor)?,
-            3 => nbt::from_reader(cursor)?,
-            _ => return Err(io::Error::new(io::ErrorKind::InvalidData, "Unknown compression type")),
+        let region_file_cache_entry = self.region_file_cache.entry(region_pos).or_try_insert_with::<io::Error>(|| {
+            let save_dir = self.get_save_dir(world);
+            let region_path = save_dir.join("region").join(format!("r.{}.{}.mca", region_pos.x, region_pos.y));
+            let raf = RandomAccessFile::open(region_path)?;
+            Ok((raf, time::SystemTime::now()))
+        })?;
+        Ok(region_file_cache_entry)
+    }
+
+    fn read_chunk(&self, world: &World, pos: ChunkPos) -> io::Result<Option<Chunk>> {
+        let serialized_chunk: SerializedChunk = {
+            let region_file_cache_entry = self.get_region_file(world, pos >> 5i8)?;
+            let raf = &region_file_cache_entry.0;
+
+            #[allow(clippy::uninit_assumed_init)]
+                let mut sector_data: [u8; 4] = unsafe { MaybeUninit::uninit().assume_init() };
+            raf.read_exact_at((((pos.x & 31) | ((pos.y & 31) << 5)) << 2) as u64, &mut sector_data)?;
+            if sector_data == [0, 0, 0, 0] {
+                return Ok(None);
+            }
+            let offset = Cursor::new(sector_data).read_u24::<BigEndian>()? as u64 * 4096;
+            let size = sector_data[3] as usize * 4096;
+            if size < 5 {
+                return Err(io::Error::new(io::ErrorKind::InvalidData, "Chunk header is truncated"));
+            }
+            let mut buffer = Vec::with_capacity(size);
+            #[allow(clippy::uninit_vec)]
+                unsafe { buffer.set_len(size); }
+            raf.read_exact_at(offset, &mut buffer)?;
+            let mut cursor = Cursor::new(&buffer);
+            let m = cursor.read_i32::<BigEndian>()?;
+            let b = cursor.read_u8()?;
+            if m == 0 {
+                return Err(io::Error::new(io::ErrorKind::InvalidData, "Chunk is allocated, but stream is missing"));
+            }
+            if b & 128 != 0 {
+                if m != 1 {
+                    return Err(io::Error::new(io::ErrorKind::InvalidData, "Chunk has both internal and external streams"));
+                }
+                // TODO: read external chunks
+                return Err(io::Error::new(io::ErrorKind::InvalidData, "External chunk"));
+            }
+            if m < 0 {
+                return Err(io::Error::new(io::ErrorKind::InvalidData, format!("Declared size {} of chunk is negative", m)));
+            }
+            let n = (m - 1) as usize;
+            if n > size - 5 {
+                return Err(io::Error::new(io::ErrorKind::InvalidData, format!("Declared size {} of chunk is larger than actual size {}", n, size)));
+            }
+            match b {
+                1 => nbt::from_gzip_reader(cursor)?,
+                2 => nbt::from_zlib_reader(cursor)?,
+                3 => nbt::from_reader(cursor)?,
+                _ => return Err(io::Error::new(io::ErrorKind::InvalidData, "Unknown compression type")),
+            }
         };
 
         let mut chunk = Chunk::empty();
@@ -364,7 +434,7 @@ impl Dimension {
         }
         chunk.subchunks.shrink_to_fit();
 
-        Ok(chunk)
+        Ok(Some(chunk))
     }
 }
 

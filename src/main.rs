@@ -2,6 +2,7 @@
 #![feature(derive_default_enum)]
 #![feature(downcast_unchecked)]
 #![feature(exact_size_is_empty)]
+#![feature(explicit_generic_args_with_impl_trait)]
 #![feature(int_log)]
 #![feature(int_roundings)]
 #![feature(option_result_contains)]
@@ -175,7 +176,7 @@ fn main() {
         let mut worlds = world::WORLDS.write().unwrap();
         worlds.push(world::WorldRef(world));
         let dimension_cell = worlds.last().unwrap().unwrap().get_dimension(&CommonFNames.OVERWORLD).unwrap();
-        let mut dimension = dimension_cell.write().unwrap();
+        let dimension = dimension_cell.write().unwrap();
         dimension.load_chunk(worlds.last().unwrap().unwrap(), geom::ChunkPos::new(0, 0));
     }
 

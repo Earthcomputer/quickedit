@@ -61,9 +61,9 @@ common_fnames! {
     AGE = "age";
     LEVEL = "level";
     ZERO = "0";
+    ONE = "1";
     POWER = "power";
     SNOWY = "snowy";
-    TRUE = "true";
 
     // textures
     MISSINGNO = "missingno";

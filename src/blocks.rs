@@ -50,7 +50,7 @@ fn get_tall_grass_color(world: &World, dimension: &Dimension, pos: BlockPos, sta
 }
 
 fn get_grass_color_with_possible_snow(world: &World, dimension: &Dimension, pos: BlockPos, state: &IBlockState) -> glam::IVec3 {
-    if state.properties.get(&CommonFNames.SNOWY) == Some(&CommonFNames.TRUE) {
+    if state.properties.get(&CommonFNames.SNOWY) == Some(&CommonFNames.ONE) {
         glam::IVec3::new(255, 255, 255)
     } else {
         get_grass_color(world, dimension, pos, state)
