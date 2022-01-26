@@ -1,5 +1,6 @@
 use ahash::AHashMap;
-use glam::{Mat4, Quat, Vec3, Vec3Swizzles, Vec4};
+use approx::AbsDiffEq;
+use glam::{Affine2, Affine3A, IVec3, IVec4, Mat4, Quat, Vec2, Vec3, Vec3Swizzles, Vec4};
 use glium::{Surface, uniform};
 use num_traits::FloatConst;
 use crate::{blocks, CommonFNames, geom, make_a_hash_map, util};
@@ -253,7 +254,17 @@ impl WorldRenderer {
     fn render_state(&self, world: &World, dimension: &Dimension, state: &IBlockState, pos: BlockPos, out_geometry: &mut ChunkGeometry) {
         let color = blocks::get_block_color(world, dimension, pos, state);
         let baked_model = self.get_baked_model(world, state);
-        for (_dir, face) in &baked_model.faces {
+        for (dir, face) in &baked_model.faces {
+            if let Some(dir) = dir {
+                if let Some(neighbor) = dimension.get_block_state(pos + dir.forward()) {
+                    let neighbor_model = self.get_baked_model(world, &neighbor);
+                    if let Some(neighbor_face) = neighbor_model.faces.get(&Some(dir.opposite())) {
+                        if (face.cull_mask[0] & !neighbor_face.cull_mask[0]) == IVec4::ZERO && (face.cull_mask[1] & !neighbor_face.cull_mask[1]) == IVec4::ZERO {
+                            continue;
+                        }
+                    }
+                }
+            }
             let geom = match face.transparency {
                 Transparency::Opaque => &mut out_geometry.opaque_geometry,
                 Transparency::Transparent => &mut out_geometry.transparent_geometry,
@@ -396,10 +407,12 @@ impl WorldRenderer {
                     };
                     let (u1, v1, u2, v2) = ((sprite.u1 as f32).lerp(sprite.u2 as f32, u1), (sprite.v1 as f32).lerp(sprite.v2 as f32, v1), (sprite.u1 as f32).lerp(sprite.u2 as f32, u2), (sprite.v1 as f32).lerp(sprite.v2 as f32, v2));
                     let (u1, v1, u2, v2) = (u1 / atlas.width as f32, v1 / atlas.height as f32, u2 / atlas.width as f32, v2 / atlas.height as f32);
-                    let dest_face = baked_model.faces
-                        .entry(face.cullface.map(|cullface| cullface.transform(&model_transform)))
-                        .or_insert_with(BakedModelFace::default);
-                    let index = dest_face.vertices.len() as u16;
+                    let dest_face = dir.transform(&element_transform);
+                    let mut dest_face = if dest_face.forward().as_vec3().abs_diff_eq(element_transform.transform_vector3(dir.forward().as_vec3()).normalize(), 0.001) {
+                        Some(dest_face)
+                    } else {
+                        None
+                    };
                     let (vert1, vert2, vert3, vert4) = match dir {
                         geom::Direction::PosX =>
                             (Vec3::new(element.to.x, element.from.y, element.to.z), Vec3::new(element.to.x, element.from.y, element.from.z),
@@ -420,6 +433,41 @@ impl WorldRenderer {
                             (Vec3::new(element.to.x, element.from.y, element.from.z), Vec3::new(element.from.x, element.from.y, element.from.z),
                              Vec3::new(element.from.x, element.to.y, element.from.z), Vec3::new(element.to.x, element.to.y, element.from.z)),
                     };
+                    if !dest_face.map(|dest_face| (vert1 * 0.125 - 1.0).dot(dest_face.forward().as_vec3()).abs_diff_eq(&1.0f32, 0.001)).unwrap_or(false) {
+                        dest_face = None;
+                    }
+                    let cull_mask = if let Some(dest_face) = dest_face {
+                        let transform = Affine3A::from_translation(Vec3::new(0.5, 0.5, 0.5))
+                            * Affine3A::from_quat(Quat::from_rotation_arc(dest_face.forward().as_vec3(), Vec3::Z))
+                            * Affine3A::from_translation(Vec3::new(-0.5, -0.5, -0.5))
+                            * Affine3A::from_scale(Vec3::new(1.0 / 16.0, 1.0 / 16.0, 1.0 / 16.0));
+                        let (vert1, vert2, vert4) = (transform.transform_point3(vert1).xy(), transform.transform_point3(vert2).xy(), transform.transform_point3(vert4).xy());
+                        let face_transform = Affine2::from_cols(vert2 - vert1, vert4 - vert1, vert1);
+                        let mut cull_mask = [IVec4::ZERO, IVec4::ZERO];
+                        for x in 0..16 {
+                            for y in 0..16 {
+                                let transformed = face_transform.transform_point2(Vec2::new(x as f32 / 16.0, y as f32 / 16.0));
+                                let (x, y) = (transformed.x, transformed.y);
+                                let u = (sprite.u1 as f32).lerp(sprite.u2 as f32, x).round() as i32;
+                                let v = (sprite.v1 as f32).lerp(sprite.v2 as f32, y).round() as i32;
+                                let alpha = atlas.get_alpha(u.clamp(0, atlas.width as i32 - 1) as u32, v.clamp(0, atlas.height as i32 - 1) as u32);
+                                if alpha == 255 {
+                                    let mut x = ((x * 16.0).round() as i32).clamp(0, 15);
+                                    let mut y = ((y * 16.0).round() as i32).clamp(0, 15);
+                                    if dest_face.forward().dot(IVec3::ONE) == -1 {
+                                        x = 15 - x;
+                                        y = 15 - y;
+                                    }
+                                    cull_mask[(y >> 3) as usize][((y >> 1) & 3) as usize] |= 1 << (((y & 1) << 4) | x);
+                                }
+                            }
+                        }
+                        cull_mask
+                    } else {
+                        [IVec4::ZERO, IVec4::ZERO]
+                    };
+                    let dest_face = baked_model.faces.entry(dest_face).or_default();
+                    let index = dest_face.vertices.len() as u16;
                     dest_face.vertices.push(BakedModelVertex {
                         position: element_transform.transform_point3(vert1).to_array(),
                         tex_coords: [u1, v2],
@@ -447,6 +495,8 @@ impl WorldRenderer {
                     dest_face.indices.push(index + 3);
                     dest_face.indices.push(index);
                     dest_face.transparency = dest_face.transparency.merge(sprite.transparency);
+                    dest_face.cull_mask[0] = dest_face.cull_mask[0] | cull_mask[0];
+                    dest_face.cull_mask[1] = dest_face.cull_mask[1] | cull_mask[1];
                 }
             }
         }
@@ -487,6 +537,7 @@ impl WorldRenderer {
                 ],
                 indices: vec![0, 1, 2, 2, 3, 0],
                 transparency: Transparency::Opaque,
+                cull_mask: [!IVec4::ZERO, !IVec4::ZERO],
             },
             Some(geom::Direction::PosZ) => BakedModelFace {
                 vertices: vec![
@@ -513,6 +564,7 @@ impl WorldRenderer {
                 ],
                 indices: vec![0, 1, 2, 2, 3, 0],
                 transparency: Transparency::Opaque,
+                cull_mask: [!IVec4::ZERO, !IVec4::ZERO],
             },
             Some(geom::Direction::NegX) => BakedModelFace {
                 vertices: vec![
@@ -539,6 +591,7 @@ impl WorldRenderer {
                 ],
                 indices: vec![0, 1, 2, 2, 3, 0],
                 transparency: Transparency::Opaque,
+                cull_mask: [!IVec4::ZERO, !IVec4::ZERO],
             },
             Some(geom::Direction::PosX) => BakedModelFace {
                 vertices: vec![
@@ -565,6 +618,7 @@ impl WorldRenderer {
                 ],
                 indices: vec![0, 1, 2, 2, 3, 0],
                 transparency: Transparency::Opaque,
+                cull_mask: [!IVec4::ZERO, !IVec4::ZERO],
             },
             Some(geom::Direction::NegY) => BakedModelFace {
                 vertices: vec![
@@ -591,6 +645,7 @@ impl WorldRenderer {
                 ],
                 indices: vec![0, 1, 2, 2, 3, 0],
                 transparency: Transparency::Opaque,
+                cull_mask: [!IVec4::ZERO, !IVec4::ZERO],
             },
             Some(geom::Direction::PosY) => BakedModelFace {
                 vertices: vec![
@@ -617,6 +672,7 @@ impl WorldRenderer {
                 ],
                 indices: vec![0, 1, 2, 2, 3, 0],
                 transparency: Transparency::Opaque,
+                cull_mask: [!IVec4::ZERO, !IVec4::ZERO],
             },
         );
         return BakedModel { faces, ambient_occlusion: false }
@@ -634,6 +690,8 @@ struct BakedModelFace {
     vertices: Vec<BakedModelVertex>,
     indices: Vec<u16>,
     transparency: Transparency,
+    // 256 bits of data, 1 if there is a pixel on the face touching this side
+    cull_mask: [glam::IVec4; 2],
 }
 
 struct BakedModelVertex {

@@ -11,7 +11,7 @@ use lazy_static::lazy_static;
 use path_slash::{PathBufExt, PathExt};
 use crate::{fname, geom, gl, minecraft, ResourceLocation, util, renderer};
 use serde::{Deserialize, Deserializer};
-use serde::de::{Error, IntoDeserializer};
+use serde::de::Error;
 use crate::make_a_hash_map;
 use crate::fname::FName;
 use crate::fname::CommonFNames;
@@ -923,8 +923,6 @@ impl<'a> IntoIterator for &'a ElementFaces {
 pub struct ElementFace {
     pub uv: Option<Uv>,
     pub texture: String,
-    #[serde(default, deserialize_with = "deserialize_cullface")]
-    pub cullface: Option<geom::Direction>,
     #[serde(default)]
     pub rotation: u16,
     #[serde(rename = "tintindex", default = "default_tint_index")]
@@ -1021,26 +1019,6 @@ fn deserialize_float_coord<'de, D>(deserializer: D) -> Result<glam::Vec3, D::Err
     deserializer.deserialize_any(MyVisitor{})
 }
 
-fn deserialize_cullface<'de, D>(deserializer: D) -> Result<Option<geom::Direction>, D::Error> where D: Deserializer<'de> {
-    struct MyVisitor;
-    impl<'de> serde::de::Visitor<'de> for MyVisitor {
-        type Value = Option<geom::Direction>;
-
-        fn expecting(&self, formatter: &mut fmt::Formatter) -> fmt::Result {
-            formatter.write_str("a cullface")
-        }
-
-        fn visit_str<E>(self, v: &str) -> Result<Option<geom::Direction>, E> where E: Error {
-            return if v == "bottom" {
-                Ok(Some(geom::Direction::Down))
-            } else {
-                Ok(Some(Deserialize::deserialize(v.into_deserializer())?))
-            }
-        }
-    }
-    deserializer.deserialize_any(MyVisitor{})
-}
-
 #[derive(Deserialize)]
 struct Animation {
     #[serde(default = "default_one")]
@@ -1062,6 +1040,11 @@ pub struct TextureAtlas {
 impl TextureAtlas {
     pub fn get_sprite(&self, name: &FName) -> Option<&Sprite> {
         self.sprites.get(name)
+    }
+
+    pub fn get_alpha(&self, x: u32, y: u32) -> u8 {
+        let index = (y * self.width + x) as usize;
+        self.data[index * 4 + 3]
     }
 }
 

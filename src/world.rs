@@ -1,7 +1,8 @@
-use std::{fs, io, mem};
+use std::{fmt, fs, io, mem};
 use std::borrow::{Borrow, BorrowMut};
 use std::cell::RefCell;
 use std::collections::hash_map::DefaultHasher;
+use std::fmt::Formatter;
 use std::hash::{Hash, Hasher};
 use std::io::Cursor;
 use std::mem::MaybeUninit;
@@ -31,6 +32,16 @@ lazy_static! {
 pub struct BlockState {
     pub block: FName,
     pub properties: AHashMap<FName, FName>,
+}
+
+impl fmt::Display for BlockState {
+    fn fmt(&self, f: &mut Formatter<'_>) -> fmt::Result {
+        write!(f, "{}", self.block)?;
+        if !self.properties.is_empty() {
+            write!(f, "[{}]", self.properties.iter().map(|(k, v)| format!("{}={}", k.to_nice_string(), v.to_nice_string())).collect::<Vec<_>>().join(","))?;
+        }
+        Ok(())
+    }
 }
 
 #[allow(clippy::derive_hash_xor_eq)]
@@ -452,7 +463,7 @@ impl Dimension {
             }
         }
 
-        println!("{}", data);
+        // println!("{}", data);
 
         return Ok(chunk);
     }
