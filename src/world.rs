@@ -5,7 +5,7 @@ use std::collections::btree_map::BTreeMap;
 use std::collections::hash_map::DefaultHasher;
 use std::fmt::Formatter;
 use std::hash::{Hash, Hasher};
-use std::io::Cursor;
+use std::io::{Cursor, ErrorKind};
 use std::mem::MaybeUninit;
 use std::path::PathBuf;
 use std::sync::{Arc, RwLock};
@@ -323,7 +323,9 @@ impl Dimension {
             let region_file = match self.get_region_file(world, pos >> 5i8) {
                 Ok(file) => file,
                 Err(e) => {
-                    eprintln!("Failed to get region file: {}", e);
+                    if e.kind() != ErrorKind::NotFound {
+                        eprintln!("Failed to get region file: {}", e);
+                    }
                     return false;
                 }
             };
@@ -360,7 +362,16 @@ impl Dimension {
 
     fn read_chunk(&self, world: &World, pos: ChunkPos) -> io::Result<Option<Chunk>> {
         let serialized_chunk: SerializedChunk = {
-            let region_file_cache_entry = self.get_region_file(world, pos >> 5i8)?;
+            let region_file_cache_entry = match self.get_region_file(world, pos >> 5i8) {
+                Ok(entry) => entry,
+                Err(e) => {
+                    return if e.kind() == ErrorKind::NotFound {
+                        Ok(None)
+                    } else {
+                        Err(e)
+                    }
+                }
+            };
             let raf = &region_file_cache_entry.0;
 
             #[allow(clippy::uninit_assumed_init)]

@@ -19,6 +19,13 @@ pub struct Vertex {
 }
 implement_vertex!(Vertex, position, tex_coords, lightmap_coords, color);
 
+#[derive(Copy, Clone)]
+pub struct BlitVertex {
+    pub position: [f32; 3],
+    pub color: [f32; 3],
+}
+implement_vertex!(BlitVertex, position, color);
+
 #[derive(Debug, Clone, PartialEq, Eq, Hash, DeserializeFromStr, SerializeDisplay)]
 pub struct ResourceLocation {
     pub namespace: String,
