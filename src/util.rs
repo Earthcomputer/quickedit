@@ -8,7 +8,7 @@ use delegate::delegate;
 use glium::implement_vertex;
 use rayon::prelude::*;
 use serde::Deserialize;
-use serde_with::DeserializeFromStr;
+use serde_with::{DeserializeFromStr, SerializeDisplay};
 
 #[derive(Copy, Clone)]
 pub struct Vertex {
@@ -19,7 +19,7 @@ pub struct Vertex {
 }
 implement_vertex!(Vertex, position, tex_coords, lightmap_coords, color);
 
-#[derive(Debug, Clone, PartialEq, Eq, Hash, DeserializeFromStr)]
+#[derive(Debug, Clone, PartialEq, Eq, Hash, DeserializeFromStr, SerializeDisplay)]
 pub struct ResourceLocation {
     pub namespace: String,
     pub name: String,

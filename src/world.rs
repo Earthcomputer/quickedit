@@ -1,6 +1,7 @@
 use std::{fmt, fs, io, mem};
 use std::borrow::{Borrow, BorrowMut};
 use std::cell::RefCell;
+use std::collections::btree_map::BTreeMap;
 use std::collections::hash_map::DefaultHasher;
 use std::fmt::Formatter;
 use std::hash::{Hash, Hasher};
@@ -9,7 +10,7 @@ use std::mem::MaybeUninit;
 use std::path::PathBuf;
 use std::sync::{Arc, RwLock};
 use ahash::AHashMap;
-use serde::Deserialize;
+use serde::{Deserialize, Serialize};
 use byteorder::{BigEndian, ReadBytesExt};
 use dashmap::mapref::entry::Entry;
 use glam::Vec3Swizzles;
@@ -328,7 +329,7 @@ impl Dimension {
         if n > size - 5 {
             return Err(io::Error::new(io::ErrorKind::InvalidData, format!("Declared size {} of chunk is larger than actual size {}", n, size)));
         }
-        let data: nbt::Blob = match b {
+        let serialized_chunk: SerializedChunk = match b {
             1 => nbt::from_gzip_reader(cursor)?,
             2 => nbt::from_zlib_reader(cursor)?,
             3 => nbt::from_reader(cursor)?,
@@ -336,136 +337,34 @@ impl Dimension {
         };
 
         let mut chunk = Chunk::empty();
-
-        if let Some(nbt::Value::List(sections)) = data.get("sections") {
-            'sections:
-            for section in sections.iter().take(((self.max_y - self.min_y) / 16) as usize) {
-                if let nbt::Value::Compound(section_map) = section {
-                    let mut block_data = Vec::new();
-                    let mut block_palette = Vec::new();
-                    if let Some(nbt::Value::Compound(block_states)) = section_map.get("block_states") {
-                        if let Some(nbt::Value::List(palette_list)) = block_states.get("palette") {
-                            block_palette.reserve(palette_list.len());
-                            for palette_elem in palette_list {
-                                match palette_elem {
-                                    nbt::Value::Compound(palette_map) => {
-                                        if let Some(nbt::Value::String(name)) = palette_map.get("Name") {
-                                            let mut block_state = BlockState::new(&FName::new(name.parse().unwrap()));
-                                            if let Some(nbt::Value::Compound(properties)) = palette_map.get("Properties") {
-                                                let mut valid = true;
-                                                block_state.properties = properties.iter().map(|(k, v)| (FName::new(k.parse().unwrap()), FName::new(match v {
-                                                    nbt::Value::String(s) => s.to_owned(),
-                                                    nbt::Value::Byte(b) => b.to_owned().to_string(),
-                                                    nbt::Value::Short(s) => s.to_owned().to_string(),
-                                                    nbt::Value::Int(i) => i.to_owned().to_string(),
-                                                    nbt::Value::Long(l) => l.to_owned().to_string(),
-                                                    nbt::Value::Float(f) => f.to_owned().to_string(),
-                                                    nbt::Value::Double(d) => d.to_owned().to_string(),
-                                                    _ => {
-                                                        valid = false;
-                                                        CommonFNames.AIR.to_string()
-                                                    }
-                                                }.parse().unwrap()))).collect();
-                                                if !valid {
-                                                    chunk.subchunks.push(None);
-                                                    continue 'sections
-                                                }
-                                            }
-                                            block_palette.push(IBlockState::new(block_state));
-                                        } else {
-                                            chunk.subchunks.push(None);
-                                            continue 'sections
-                                        }
-                                    }
-                                    _ => {
-                                        chunk.subchunks.push(None);
-                                        continue 'sections
-                                    }
-                                }
-                            }
-                        } else {
-                            chunk.subchunks.push(None);
-                            continue 'sections
-                        }
-                        if let Some(nbt::Value::List(nbt_data)) = block_states.get("data") {
-                            block_data.reserve(nbt_data.len());
-                            for data_elem in nbt_data {
-                                match data_elem {
-                                    nbt::Value::Byte(b) => block_data.push(*b as u8 as u64),
-                                    nbt::Value::Short(s) => block_data.push(*s as u16 as u64),
-                                    nbt::Value::Int(i) => block_data.push(*i as u32 as u64),
-                                    nbt::Value::Long(l) => block_data.push(*l as u64),
-                                    _ => {
-                                        chunk.subchunks.push(None);
-                                        continue 'sections
-                                    }
-                                }
-                            }
-                        } else if block_palette.len() != 1 {
-                            chunk.subchunks.push(None);
-                            continue 'sections
-                        }
-                    } else {
-                        chunk.subchunks.push(None);
-                        continue 'sections
-                    }
-
-                    let mut biome_data = Vec::new();
-                    let mut biome_palette = Vec::new();
-                    if let Some(nbt::Value::Compound(biomes)) = section_map.get("biomes") {
-                        if let Some(nbt::Value::List(palette_list)) = biomes.get("palette") {
-                            biome_palette.reserve(palette_list.len());
-                            for palette_elem in palette_list {
-                                match palette_elem {
-                                    nbt::Value::String(s) => biome_palette.push(FName::new(s.parse().unwrap())),
-                                    _ => {
-                                        chunk.subchunks.push(None);
-                                        continue 'sections
-                                    }
-                                }
-                            }
-                        } else {
-                            chunk.subchunks.push(None);
-                            continue 'sections
-                        }
-                        if let Some(nbt::Value::List(nbt_data)) = biomes.get("data") {
-                            biome_data.reserve(nbt_data.len());
-                            for data_elem in nbt_data {
-                                match data_elem {
-                                    nbt::Value::Byte(b) => biome_data.push(*b as u8 as u64),
-                                    nbt::Value::Short(s) => biome_data.push(*s as u16 as u64),
-                                    nbt::Value::Int(i) => biome_data.push(*i as u32 as u64),
-                                    nbt::Value::Long(l) => biome_data.push(*l as u64),
-                                    _ => {
-                                        chunk.subchunks.push(None);
-                                        continue 'sections
-                                    }
-                                }
-                            }
-                        } else if biome_palette.len() != 1 {
-                            chunk.subchunks.push(None);
-                            continue 'sections
-                        }
-                    } else {
-                        chunk.subchunks.push(None);
-                        continue 'sections
-                    }
-
-                    chunk.subchunks.push(Some(Subchunk {
-                        block_data: BlockData::direct_init(block_palette, block_data),
-                        biome_data: BiomeData::direct_init(biome_palette, biome_data),
-                        baked_geometry: RefCell::new(None),
-                    }));
-                } else {
-                    chunk.subchunks.push(None);
-                    continue 'sections
+        for serialized_section in serialized_chunk.sections {
+            let block_palette: Vec<_> = serialized_section.block_states.palette.iter().map(|serialized_state| {
+                let mut state = BlockState::new(&serialized_state.name);
+                for (k, v) in &serialized_state.properties {
+                    state.properties.insert(k.clone(), FName::new(v.to_string().parse().unwrap()));
                 }
-            }
+                IBlockState::new(state)
+            }).collect();
+            let block_data = BlockData::direct_init(block_palette, serialized_section.block_states.data.iter().map(|i| *i as u64).collect());
+            let biome_data = BiomeData::direct_init(serialized_section.biomes.palette, serialized_section.biomes.data.iter().map(|i| *i as u64).collect());
+            chunk.subchunks.push(Some(Subchunk {
+                block_data,
+                biome_data,
+                baked_geometry: RefCell::new(None),
+            }));
         }
+        let num_subchunks = ((self.max_y - self.min_y + 1) >> 4) as usize;
+        if chunk.subchunks.len() < num_subchunks {
+            chunk.subchunks.reserve(num_subchunks);
+            while chunk.subchunks.len() < num_subchunks {
+                chunk.subchunks.push(None);
+            }
+        } else {
+            chunk.subchunks.truncate(num_subchunks);
+        }
+        chunk.subchunks.shrink_to_fit();
 
-        // println!("{}", data);
-
-        return Ok(chunk);
+        Ok(chunk)
     }
 }
 
@@ -549,22 +448,77 @@ impl World {
     }
 }
 
-#[derive(Deserialize)]
+#[derive(Deserialize, Serialize)]
 struct LevelDat {
     #[serde(rename = "Data")]
     data: LevelDatData,
+
+    #[serde(flatten)]
+    unknown_fields: BTreeMap<String, nbt::Value>,
 }
 
-#[derive(Deserialize)]
+#[derive(Deserialize, Serialize)]
 struct LevelDatData {
     #[serde(rename = "Version")]
     version: Option<LevelDatVersionInfo>,
+
+    #[serde(flatten)]
+    unknown_fields: BTreeMap<String, nbt::Value>,
 }
 
-#[derive(Deserialize)]
+#[derive(Deserialize, Serialize)]
 struct LevelDatVersionInfo {
     #[serde(rename = "Id")]
     id: u32,
     #[serde(rename = "Name")]
     name: String,
+
+    #[serde(flatten)]
+    unknown_fields: BTreeMap<String, nbt::Value>,
+}
+
+#[derive(Deserialize, Serialize)]
+struct SerializedChunk {
+    sections: Vec<SerializedChunkSection>,
+
+    #[serde(flatten)]
+    unknown_fields: BTreeMap<String, nbt::Value>,
+}
+
+#[derive(Deserialize, Serialize)]
+struct SerializedChunkSection {
+    block_states: SerializedBlockStates,
+    biomes: SerializedBiomes,
+
+    #[serde(flatten)]
+    unknown_fields: BTreeMap<String, nbt::Value>,
+}
+
+#[derive(Deserialize, Serialize)]
+struct SerializedBlockStates {
+    palette: Vec<SerializedBlockState>,
+    #[serde(default)]
+    data: Vec<i64>,
+
+    #[serde(flatten)]
+    unknown_fields: BTreeMap<String, nbt::Value>,
+}
+
+#[derive(Deserialize, Serialize)]
+struct SerializedBlockState {
+    #[serde(rename = "Name")]
+    name: FName,
+    #[serde(default)]
+    #[serde(rename = "Properties")]
+    properties: AHashMap<FName, nbt::Value>,
+}
+
+#[derive(Deserialize, Serialize)]
+struct SerializedBiomes {
+    palette: Vec<FName>,
+    #[serde(default)]
+    data: Vec<i64>,
+
+    #[serde(flatten)]
+    unknown_fields: BTreeMap<String, nbt::Value>,
 }
