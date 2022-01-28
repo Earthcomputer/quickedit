@@ -37,6 +37,7 @@ jobs:
         with:
           command: build
           args: --release
+      - run: chmod +x target/release/quickedit
       - id: upload-release-asset
         uses: actions/upload-release-asset@v1
         env:
