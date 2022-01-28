@@ -627,7 +627,9 @@ impl WorldRef {
     {
         let static_self = util::extend_lifetime(self);
         self.thread_pool.spawn(move || {
-            job(&*static_self.world, &(|| static_self.dropping));
+            if !static_self.dropping {
+                job(&*static_self.world, &(|| static_self.dropping));
+            }
         });
     }
 }
@@ -644,6 +646,7 @@ impl DerefMut for WorldRef {
 }
 impl Drop for WorldRef {
     fn drop(&mut self) {
+        println!("Dropping world");
         self.dropping = true;
     }
 }

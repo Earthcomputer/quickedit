@@ -89,7 +89,7 @@ enum Request<'a, 'b: 'a> {
     Redraw,
 }
 
-fn run_loop<F>(display: Display, event_loop: event_loop::EventLoop<()>, ui_state: Rc<RefCell<UiState>>, mut callback: F) -> !
+fn run_loop<F>(display: Display, event_loop: event_loop::EventLoop<()>, _ui_state: Rc<RefCell<UiState>>, mut callback: F) -> !
 where
     F: 'static + FnMut(Request, &Display),
 {
@@ -124,8 +124,6 @@ where
                 }, &display);
                 if needs_redraw {
                     display.gl_window().window().request_redraw();
-                } else if !ui::needs_tick(&*(*ui_state).borrow()) {
-                    next_update = None;
                 }
             }
             _ => {}

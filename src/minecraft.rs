@@ -15,7 +15,7 @@ use crate::fname::FName;
 // ===== Getting the Minecraft jar ===== //
 
 #[cfg(target_os = "windows")]
-fn get_dot_minecraft() -> Option<PathBuf> {
+pub fn get_dot_minecraft() -> Option<PathBuf> {
     if let Some(appdata) = std::env::var_os("APPDATA") {
         let path = PathBuf::from(appdata).join(".minecraft");
         if path.exists() {
@@ -32,7 +32,7 @@ fn get_dot_minecraft() -> Option<PathBuf> {
 }
 
 #[cfg(target_os = "macos")]
-fn get_dot_minecraft() -> Option<PathBuf> {
+pub fn get_dot_minecraft() -> Option<PathBuf> {
     if let Some(home) = home::home_dir() {
         let path = home.join("Library").join("Application Support").join("minecraft");
         if path.exists() {
@@ -47,7 +47,7 @@ fn get_dot_minecraft() -> Option<PathBuf> {
 }
 
 #[cfg(not(any(target_os = "windows", target_os = "macos")))]
-fn get_dot_minecraft() -> Option<PathBuf> {
+pub fn get_dot_minecraft() -> Option<PathBuf> {
     if let Some(home) = home::home_dir() {
         let path = home.join(".minecraft");
         if path.exists() {
@@ -232,6 +232,8 @@ fn prismarine_url(suffix: &str) -> String {
 }
 
 fn get_prismarine_version_data(mc_version: &str) -> io::Result<PrismarineVersionData> {
+    fs::create_dir_all(get_minecraft_cache())?;
+
     let data_paths: PrismarineData = download_if_changed("dataPaths.json", prismarine_url("dataPaths.json").as_str(), false)?;
     let mc_version = if data_paths.pc.contains_key(mc_version) {
         mc_version.to_string()

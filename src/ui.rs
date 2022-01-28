@@ -1,3 +1,4 @@
+use std::path::PathBuf;
 use conrod_core::{Colorable, event, input, Labelable, Positionable, Sizeable, widget, Widget, widget_ids};
 use glam::{DMat2, DVec2};
 use winit::dpi;
@@ -61,7 +62,8 @@ pub fn set_ui(state: &UiState, ui: &mut conrod_core::UiCell) {
 }
 
 fn open_clicked() {
-    let path = native_dialog::FileDialog::new().show_open_single_dir();
+    let dot_minecraft = minecraft::get_dot_minecraft().unwrap_or_else(|| PathBuf::from("."));
+    let path = native_dialog::FileDialog::new().set_location(&dot_minecraft).show_open_single_dir();
     if let Ok(Some(path)) = path {
         let mut interaction_handler = UiInteractionHandler{};
         let executor = async_executor::LocalExecutor::new();
@@ -150,15 +152,6 @@ pub fn handle_event(ui_state: &mut UiState, ui: &conrod_core::Ui, event: &event:
     }
 }
 
-pub fn needs_tick(ui_state: &UiState) -> bool {
-    ui_state.key_states.neg_x_down || ui_state.key_states.pos_x_down ||
-    ui_state.key_states.neg_y_down || ui_state.key_states.pos_y_down ||
-    ui_state.key_states.neg_z_down || ui_state.key_states.pos_z_down ||
-    ui_state.key_states.neg_yaw_down || ui_state.key_states.pos_yaw_down ||
-    ui_state.key_states.neg_pitch_down || ui_state.key_states.pos_pitch_down ||
-    ui_state.key_states.mouse_dx != 0.0 || ui_state.key_states.mouse_dy != 0.0
-}
-
 pub fn tick(ui_state: &mut UiState) {
     let mut x = 0.0;
     let mut y = 0.0;
@@ -206,10 +199,11 @@ pub fn tick(ui_state: &mut UiState) {
     ui_state.key_states.mouse_dy = 0.0;
     if x != 0.0 || y != 0.0 || z != 0.0 || yaw != 0.0 || pitch != 0.0 {
         let mut worlds = world::WORLDS.write().unwrap();
-        let world = worlds.last_mut().unwrap();
-        let mut camera = world.camera.write().unwrap();
-        let xz = DMat2::from_angle(-(camera.yaw as f64).to_radians()).mul_vec2(DVec2::new(x, z));
-        camera.move_camera(xz.x, y, xz.y, yaw, pitch);
+        if let Some(world) = worlds.last_mut() {
+            let mut camera = world.camera.write().unwrap();
+            let xz = DMat2::from_angle(-(camera.yaw as f64).to_radians()).mul_vec2(DVec2::new(x, z));
+            camera.move_camera(xz.x, y, xz.y, yaw, pitch);
+        }
     }
 }
 
