@@ -538,7 +538,7 @@ fn chunk_loader(world: &World, stop: &dyn Fn() -> bool) {
 
 lazy_static! {
     static ref GLOBAL_TICK_VAR: Condvar = Condvar::new();
-    static ref GLOBAL_TICK_MUTEX: Mutex<()> = Mutex::new(());
+    static ref GLOBAL_TICK_MUTEX: Mutex<usize> = Mutex::new(0);
 }
 
 pub struct World {
@@ -592,6 +592,10 @@ impl World {
     }
 
     pub fn tick() {
+        {
+            let mut global_tick_mutex = GLOBAL_TICK_MUTEX.lock().unwrap();
+            *global_tick_mutex = global_tick_mutex.wrapping_add(1);
+        }
         GLOBAL_TICK_VAR.notify_all();
     }
 
