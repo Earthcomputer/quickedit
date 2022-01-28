@@ -31,15 +31,18 @@ extern crate native_dialog;
 use std::cell::RefCell;
 use std::path::PathBuf;
 use std::rc::Rc;
+use std::sync::Mutex;
 use conrod_core::text;
 use glium::{glutin::{dpi, event, event_loop, window, ContextBuilder}, Display};
 use glium::Surface;
 use image::GenericImageView;
+use lazy_static::lazy_static;
 use winit::window::Icon;
 use structopt::StructOpt;
 use crate::fname::CommonFNames;
 use crate::ui::UiState;
 use crate::util::ResourceLocation;
+use crate::world::World;
 
 #[allow(clippy::all)]
 mod gl {
@@ -64,6 +67,14 @@ thread_local! {
         let image = image::load_from_memory_with_format(ICON_DATA, image::ImageFormat::Png).unwrap();
         Icon::from_rgba(image.as_rgba8().unwrap().as_raw().clone(), image.width(), image.height()).unwrap()
     };
+}
+
+lazy_static! {
+    static ref QUEUED_TASKS: Mutex<Vec<Box<dyn FnOnce() + Send + 'static>>> = Mutex::new(Vec::new());
+}
+
+pub fn add_queued_task(task: impl FnOnce() + Send + 'static) {
+    QUEUED_TASKS.lock().unwrap().push(Box::new(task));
 }
 
 enum Request<'a, 'b: 'a> {
@@ -165,7 +176,7 @@ fn main() {
             }
         }
         let mut interaction_handler = CmdLineInteractionHandler{};
-        let world = match world::World::new(world_folder, &mut interaction_handler) {
+        let world = match world::World::load(world_folder, &mut interaction_handler) {
             Ok(world) => world,
             Err(err) => {
                 println!("Failed to load world: {}", err);
@@ -174,10 +185,7 @@ fn main() {
         };
 
         let mut worlds = world::WORLDS.write().unwrap();
-        worlds.push(world::WorldRef(world));
-        let dimension_cell = worlds.last().unwrap().unwrap().get_dimension(&CommonFNames.OVERWORLD).unwrap();
-        let dimension = dimension_cell.write().unwrap();
-        dimension.load_chunk(worlds.last().unwrap().unwrap(), geom::ChunkPos::new(0, 0));
+        worlds.push(world);
     }
 
     let mut my_ui = conrod_core::UiBuilder::new([WIDTH, HEIGHT]).build();
@@ -215,12 +223,19 @@ fn main() {
                 }
             },
             Request::SetUi { needs_redraw } => {
+                {
+                    let mut queued_tasks = QUEUED_TASKS.lock().unwrap();
+                    for task in queued_tasks.drain(..) {
+                        task();
+                    }
+                }
                 let my_ui = &mut my_ui.set_widgets();
                 ui::set_ui(&*(*ui_state).borrow(), my_ui);
                 ui::tick(&mut *(*ui_state).borrow_mut());
+                World::tick();
                 *needs_redraw = my_ui.has_changed() || {
                     let worlds = world::WORLDS.read().unwrap();
-                    worlds.iter().any(|world| world.unwrap().renderer.has_changed())
+                    worlds.iter().any(|world| world.renderer.has_changed())
                 };
             },
             Request::Redraw => {
@@ -232,9 +247,7 @@ fn main() {
                 {
                     let worlds = world::WORLDS.read().unwrap();
                     if let Some(world) = worlds.last() {
-                        let arc = world.unwrap().get_dimension(&CommonFNames.OVERWORLD).unwrap();
-                        let dimension = arc.read().unwrap();
-                        world.unwrap().renderer.render_world(world.unwrap(), &*dimension, &mut target);
+                        world.renderer.render_world(&*world, &mut target);
                     }
                 }
 

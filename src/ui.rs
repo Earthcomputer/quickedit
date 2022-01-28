@@ -1,7 +1,7 @@
 use conrod_core::{Colorable, event, input, Labelable, Positionable, Sizeable, widget, Widget, widget_ids};
 use glam::{DMat2, DVec2};
 use winit::dpi;
-use crate::{CommonFNames, geom, minecraft, world, renderer};
+use crate::{minecraft, world, renderer};
 
 widget_ids!(pub struct Ids {
     debug,
@@ -39,7 +39,7 @@ pub fn set_ui(state: &UiState, ui: &mut conrod_core::UiCell) {
         let worlds = world::WORLDS.read().unwrap();
         match worlds.last() {
             Some(world) => {
-                let camera = &world.unwrap().camera;
+                let camera = &world.camera.read().unwrap();
                 (camera.pos.x, camera.pos.y, camera.pos.z, camera.yaw, camera.pitch)
             }
             None => (0.0, 0.0, 0.0, 0.0, 0.0),
@@ -65,16 +65,10 @@ fn open_clicked() {
     if let Ok(Some(path)) = path {
         let mut interaction_handler = UiInteractionHandler{};
         let executor = async_executor::LocalExecutor::new();
-        let task = executor.spawn(async { world::World::new(path, &mut interaction_handler) });
+        let task = executor.spawn(async { world::World::load(path, &mut interaction_handler) });
         let world = futures_lite::future::block_on(executor.run(task)).expect("Failed to load world");
-        {
-            let mut worlds = world::WORLDS.write().unwrap();
-            worlds.push(world::WorldRef(world));
-        }
-        let worlds = world::WORLDS.read().unwrap();
-        let dimension_cell = worlds.last().unwrap().unwrap().get_dimension(&CommonFNames.OVERWORLD).unwrap();
-        let dimension = dimension_cell.write().unwrap();
-        dimension.load_chunk(worlds.last().unwrap().unwrap(), geom::ChunkPos::new(0, 0));
+        let mut worlds = world::WORLDS.write().unwrap();
+        worlds.push(world);
     }
 }
 
@@ -212,9 +206,10 @@ pub fn tick(ui_state: &mut UiState) {
     ui_state.key_states.mouse_dy = 0.0;
     if x != 0.0 || y != 0.0 || z != 0.0 || yaw != 0.0 || pitch != 0.0 {
         let mut worlds = world::WORLDS.write().unwrap();
-        let world = worlds.last_mut().unwrap().unwrap_mut();
-        let xz = DMat2::from_angle(-(world.camera.yaw as f64).to_radians()).mul_vec2(DVec2::new(x, z));
-        world.camera.move_camera(xz.x, y, xz.y, yaw, pitch);
+        let world = worlds.last_mut().unwrap();
+        let mut camera = world.camera.write().unwrap();
+        let xz = DMat2::from_angle(-(camera.yaw as f64).to_radians()).mul_vec2(DVec2::new(x, z));
+        camera.move_camera(xz.x, y, xz.y, yaw, pitch);
     }
 }
 

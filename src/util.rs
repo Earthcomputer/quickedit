@@ -320,3 +320,8 @@ where
         (other - self) * t + self
     }
 }
+
+#[inline]
+pub unsafe fn extend_lifetime<T>(t: &T) -> &'static T {
+    std::mem::transmute(t)
+}

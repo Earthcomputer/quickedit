@@ -15,7 +15,7 @@ use serde::de::Error;
 use crate::make_a_hash_map;
 use crate::fname::FName;
 use crate::fname::CommonFNames;
-use crate::util::make_fast_dash_map;
+use crate::util::{FastDashMap, make_fast_dash_map};
 use crate::world::IBlockState;
 
 lazy_static! {
@@ -142,6 +142,8 @@ pub const MISSINGNO_DATA: &[u8] = include_bytes!("../res/missingno.png");
 
 #[derive(Default)]
 pub struct Resources {
+    pub baked_model_cache: FastDashMap<IBlockState, renderer::BakedModel>,
+
     blockstates: AHashMap<FName, BlockstateFile>,
     block_models: AHashMap<FName, BlockModel>,
     pub block_atlas: TextureAtlas,

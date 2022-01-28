@@ -1,14 +1,14 @@
 use std::{fmt, fs, io, mem, time};
-use std::borrow::{Borrow, BorrowMut};
-use std::cell::RefCell;
 use std::collections::btree_map::BTreeMap;
 use std::collections::hash_map::DefaultHasher;
 use std::fmt::Formatter;
 use std::hash::{Hash, Hasher};
 use std::io::{Cursor, ErrorKind};
 use std::mem::MaybeUninit;
+use std::ops::{Deref, DerefMut};
 use std::path::PathBuf;
-use std::sync::{Arc, RwLock};
+use std::sync::{Arc, Condvar, Mutex, RwLock};
+use std::sync::atomic::{AtomicBool, Ordering};
 use ahash::AHashMap;
 use serde::{Deserialize, Serialize};
 use byteorder::{BigEndian, ReadBytesExt};
@@ -19,8 +19,8 @@ use lazy_static::lazy_static;
 use num_integer::Integer;
 use positioned_io_preview::{RandomAccessFile, ReadAt, ReadBytesAtExt};
 use crate::fname::{CommonFNames, FName};
-use crate::{minecraft, renderer};
-use crate::geom::{BlockPos, ChunkPos};
+use crate::{minecraft, renderer, util};
+use crate::geom::{BlockPos, ChunkPos, IVec2RangeExtensions};
 use crate::resources;
 use crate::util::{FastDashMap, make_fast_dash_map};
 use crate::renderer::WorldRenderer;
@@ -177,32 +177,38 @@ macro_rules! define_paletted_data {
 }
 
 define_paletted_data!(BlockData, IBlockState, 4_usize, 4_usize, 16_usize);
-define_paletted_data!(BiomeData, FName, 2_usize, 2_usize, 4_usize);
+define_paletted_data!(BiomeData, FName, 2_usize, 2_usize, 2_usize);
 
 pub struct Subchunk {
-    block_data: BlockData,
-    biome_data: BiomeData,
+    block_data: RwLock<BlockData>,
+    biome_data: RwLock<BiomeData>,
 
-    pub baked_geometry: RefCell<Option<renderer::BakedChunkGeometry>>,
+    pub needs_redraw: AtomicBool,
+    pub baked_geometry: Mutex<Option<renderer::BakedChunkGeometry>>,
 }
 
 impl Subchunk {
-    pub fn get_block_state(&self, pos: BlockPos) -> &IBlockState {
-        self.block_data.get(pos.x as usize, pos.y as usize, pos.z as usize)
+    pub fn get_block_state(&self, pos: BlockPos) -> IBlockState {
+        self.block_data.read().unwrap().get(pos.x as usize, pos.y as usize, pos.z as usize).clone()
     }
 
-    pub fn set_block_state(&mut self, pos: BlockPos, value: &IBlockState) {
-        self.block_data.set(pos.x as usize, pos.y as usize, pos.z as usize, value);
+    pub fn set_block_state(&self, pos: BlockPos, value: &IBlockState) {
+        self.block_data.write().unwrap().set(pos.x as usize, pos.y as usize, pos.z as usize, value);
+        self.needs_redraw.store(true, Ordering::Release);
     }
 
-    pub fn get_biome(&self, pos: BlockPos) -> &FName {
-        self.biome_data.get(pos.x as usize >> 2, pos.y as usize >> 2, pos.z as usize >> 2)
+    pub fn get_biome(&self, pos: BlockPos) -> FName {
+        self.biome_data.read().unwrap().get(pos.x as usize >> 2, pos.y as usize >> 2, pos.z as usize >> 2).clone()
     }
 
-    pub fn set_biome(&mut self, pos: BlockPos, value: &FName) {
-        self.biome_data.set(pos.x as usize >> 2, pos.y as usize >> 2, pos.z as usize >> 2, value);
+    pub fn set_biome(&self, pos: BlockPos, value: &FName) {
+        self.biome_data.write().unwrap().set(pos.x as usize >> 2, pos.y as usize >> 2, pos.z as usize >> 2, value);
+        self.needs_redraw.store(true, Ordering::Release);
     }
 }
+
+unsafe impl Send for Subchunk {}
+unsafe impl Sync for Subchunk {}
 
 pub struct Chunk {
     pub subchunks: Vec<Option<Subchunk>>,
@@ -225,7 +231,7 @@ impl Chunk {
             return None;
         }
         let subchunk = self.subchunks[subchunk_index].as_ref()?;
-        Some(subchunk.get_block_state(pos & glam::IVec3::new(!0, 15, !0)).clone())
+        Some(subchunk.get_block_state(pos & glam::IVec3::new(!0, 15, !0)))
     }
 
     pub fn get_biome(&self, dimension: &Dimension, pos: BlockPos) -> Option<FName> {
@@ -238,7 +244,7 @@ impl Chunk {
             return None;
         }
         let subchunk = self.subchunks[subchunk_index].as_ref()?;
-        Some(subchunk.get_biome(pos & glam::IVec3::new(!0, 15, !0)).clone())
+        Some(subchunk.get_biome(pos & glam::IVec3::new(!0, 15, !0)))
     }
 }
 
@@ -309,6 +315,10 @@ impl Dimension {
                 eprintln!("Failed to load chunk: {}", err);
             }
         }).ok()
+    }
+
+    pub fn unload_chunk(&self, _world: &World, pos: ChunkPos) {
+        self.chunks.remove(&pos);
     }
 
     pub fn does_chunk_exist(&self, world: &World, pos: ChunkPos) -> bool {
@@ -429,9 +439,10 @@ impl Dimension {
             let block_data = BlockData::direct_init(block_palette, serialized_section.block_states.data.iter().map(|i| *i as u64).collect());
             let biome_data = BiomeData::direct_init(serialized_section.biomes.palette, serialized_section.biomes.data.iter().map(|i| *i as u64).collect());
             chunk.subchunks.push(Some(Subchunk {
-                block_data,
-                biome_data,
-                baked_geometry: RefCell::new(None),
+                block_data: RwLock::new(block_data),
+                biome_data: RwLock::new(biome_data),
+                needs_redraw: AtomicBool::new(true),
+                baked_geometry: Mutex::new(None),
             }));
         }
         let num_subchunks = ((self.max_y - self.min_y + 1) >> 4) as usize;
@@ -449,8 +460,8 @@ impl Dimension {
     }
 }
 
-#[derive(Default)]
 pub struct Camera {
+    pub dimension: FName,
     pub pos: glam::DVec3,
     pub yaw: f32,
     pub pitch: f32,
@@ -466,39 +477,81 @@ impl Camera {
     }
 }
 
-pub struct WorldRef(pub World);
-unsafe impl Send for WorldRef {}
-unsafe impl Sync for WorldRef {}
-impl WorldRef {
-    pub fn unwrap(&self) -> &World {
-        &self.0
-    }
-    pub fn unwrap_mut(&mut self) -> &mut World {
-        &mut self.0
-    }
-}
-impl Borrow<World> for WorldRef {
-    fn borrow(&self) -> &World {
-        &self.0
-    }
-}
-impl BorrowMut<World> for WorldRef {
-    fn borrow_mut(&mut self) -> &mut World {
-        &mut self.0
+fn chunk_loader(world: &World, stop: &dyn Fn() -> bool) {
+    let render_distance = 16;
+    let mut prev_dimension: Option<FName> = None;
+    let mut prev_chunk_pos = None;
+
+    'outer_loop:
+    while !stop() {
+        // find chunk to load
+        let (dimension, pos) = {
+            let camera = world.camera.read().unwrap();
+            (camera.dimension.clone(), camera.pos)
+        };
+        if prev_dimension.as_ref() != Some(&dimension) {
+            if let Some(prev_dimension) = prev_dimension {
+                if let Some(prev_dimension) = world.get_dimension(&prev_dimension) {
+                    for chunk_pos in ((prev_chunk_pos.unwrap() - ChunkPos::new(render_distance, render_distance))..=(prev_chunk_pos.unwrap() + ChunkPos::new(render_distance, render_distance))).iter() {
+                        prev_dimension.unload_chunk(world, chunk_pos);
+                    }
+                }
+            }
+            prev_dimension = Some(dimension.clone());
+        }
+
+        let dimension = match world.get_dimension(&dimension) {
+            Some(dimension) => dimension,
+            None => {
+                World::worker_yield();
+                continue
+            },
+        };
+
+        let chunk_pos = pos.xz().floor().as_ivec2() >> 4;
+
+        if prev_chunk_pos != Some(chunk_pos) {
+            if let Some(prev_chunk_pos) = prev_chunk_pos {
+                for cp in ((prev_chunk_pos - ChunkPos::new(render_distance, render_distance))..=(prev_chunk_pos + ChunkPos::new(render_distance, render_distance))).iter() {
+                    let delta: IVec2 = cp - chunk_pos;
+                    let distance = delta.abs().max_element();
+                    if distance > render_distance {
+                        dimension.unload_chunk(world, cp);
+                    }
+                }
+            }
+            prev_chunk_pos = Some(chunk_pos);
+        }
+
+        for chunk_pos in ((chunk_pos - ChunkPos::new(render_distance, render_distance))..=(chunk_pos + ChunkPos::new(render_distance, render_distance))).iter() {
+            if dimension.get_chunk(chunk_pos).is_none()
+                && dimension.does_chunk_exist(world, chunk_pos)
+                && dimension.load_chunk(world, chunk_pos).is_some()
+            {
+                continue 'outer_loop;
+            }
+        }
+
+        World::worker_yield();
     }
 }
 
+lazy_static! {
+    static ref GLOBAL_TICK_VAR: Condvar = Condvar::new();
+    static ref GLOBAL_TICK_MUTEX: Mutex<()> = Mutex::new(());
+}
+
 pub struct World {
-    pub camera: Camera,
+    pub camera: RwLock<Camera>,
     level_dat: LevelDat,
     path: PathBuf,
     pub resources: resources::Resources,
     pub renderer: WorldRenderer,
-    dimensions: FastDashMap<FName, Arc<RwLock<Dimension>>>,
+    dimensions: FastDashMap<FName, Arc<Dimension>>,
 }
 
 impl World {
-    pub fn new(path: PathBuf, interaction_handler: &mut dyn minecraft::DownloadInteractionHandler) -> io::Result<World> {
+    pub fn load(path: PathBuf, interaction_handler: &mut dyn minecraft::DownloadInteractionHandler) -> io::Result<WorldRef> {
         let level_dat = path.join("level.dat");
         let level_dat: LevelDat = nbt::from_gzip_reader(fs::File::open(level_dat)?)?;
         let mc_version = level_dat.data.version.as_ref().map(|v| &v.name).unwrap_or(&minecraft::ABSENT_MINECRAFT_VERSION.to_string()).clone();
@@ -508,7 +561,12 @@ impl World {
         };
         let renderer = WorldRenderer::new(&mc_version, &resources);
         let world = World {
-            camera: Camera::default(),
+            camera: RwLock::new(Camera {
+                dimension: CommonFNames.OVERWORLD.clone(),
+                pos: glam::DVec3::ZERO,
+                yaw: 0.0,
+                pitch: 0.0,
+            }),
             level_dat,
             path,
             resources,
@@ -518,14 +576,71 @@ impl World {
         let mut overworld = Dimension::new(CommonFNames.OVERWORLD.clone());
         overworld.min_y = -64;
         overworld.max_y = 384;
-        world.dimensions.insert(CommonFNames.OVERWORLD.clone(), Arc::new(RwLock::new(overworld)));
-        world.dimensions.insert(CommonFNames.THE_NETHER.clone(), Arc::new(RwLock::new(Dimension::new(CommonFNames.THE_NETHER.clone()))));
-        world.dimensions.insert(CommonFNames.THE_END.clone(), Arc::new(RwLock::new(Dimension::new(CommonFNames.THE_END.clone()))));
+        world.dimensions.insert(CommonFNames.OVERWORLD.clone(), Arc::new(overworld));
+        world.dimensions.insert(CommonFNames.THE_NETHER.clone(), Arc::new(Dimension::new(CommonFNames.THE_NETHER.clone())));
+        world.dimensions.insert(CommonFNames.THE_END.clone(), Arc::new(Dimension::new(CommonFNames.THE_END.clone())));
+        let world = WorldRef::new(world);
+        unsafe {
+            world.spawn_worker(chunk_loader);
+        }
+        WorldRenderer::start_build_worker(&world);
         Ok(world)
     }
 
-    pub fn get_dimension(&self, id: &FName) -> Option<Arc<RwLock<Dimension>>> {
+    pub fn get_dimension(&self, id: &FName) -> Option<Arc<Dimension>> {
         self.dimensions.view(id, |_, dim| dim.clone())
+    }
+
+    pub fn tick() {
+        GLOBAL_TICK_VAR.notify_all();
+    }
+
+    pub fn worker_yield() {
+        drop(GLOBAL_TICK_VAR.wait(GLOBAL_TICK_MUTEX.lock().unwrap()).unwrap());
+    }
+}
+
+pub struct WorldRef {
+    thread_pool: rayon::ThreadPool,
+    world: Box<World>,
+    dropping: bool,
+}
+unsafe impl Send for WorldRef {}
+unsafe impl Sync for WorldRef {}
+impl WorldRef {
+    fn new(world: World) -> Self {
+        Self {
+            thread_pool: rayon::ThreadPoolBuilder::new().num_threads((num_cpus::get() - 1).max(4)).build().unwrap(),
+            world: Box::new(world),
+            dropping: false,
+        }
+    }
+
+    /// Please kindly only access the world from your worker, and not abuse your 'static lifetime :)
+    pub unsafe fn spawn_worker<F>(&self, job: F)
+        where
+            F: FnOnce(&World, &dyn Fn() -> bool) + Send + 'static,
+    {
+        let static_self = util::extend_lifetime(self);
+        self.thread_pool.spawn(move || {
+            job(&*static_self.world, &(|| static_self.dropping));
+        });
+    }
+}
+impl Deref for WorldRef {
+    type Target = World;
+    fn deref(&self) -> &World {
+        &*self.world
+    }
+}
+impl DerefMut for WorldRef {
+    fn deref_mut(&mut self) -> &mut World {
+        &mut *self.world
+    }
+}
+impl Drop for WorldRef {
+    fn drop(&mut self) {
+        self.dropping = true;
     }
 }
 
