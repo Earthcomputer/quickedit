@@ -365,11 +365,15 @@ impl<T: 'static> MainThreadStore<T> {
         std::thread::current().id() == main_thread
     }
 
-    fn run_on_main_thread(f: impl FnOnce() + Send + 'static) {
+    fn run_on_main_thread(f: impl FnOnce() + Send + 'static, urgent: bool) {
         if Self::is_on_main_thread() {
             f();
         } else {
-            crate::add_queued_task(f);
+            if urgent {
+                crate::add_queued_task(f);
+            } else {
+                crate::add_non_urgent_queued_task(f);
+            }
         }
     }
 
@@ -399,7 +403,7 @@ impl<T: 'static> MainThreadStore<T> {
                 let data = MAIN_THREAD_DATA.unwrap();
                 (*data).data.insert(id, Box::new(ctor()));
             }
-        });
+        }, true);
         data
     }
 }
@@ -442,6 +446,6 @@ impl<T: 'static> Drop for MainThreadStore<T> {
                 let data = MAIN_THREAD_DATA.unwrap();
                 (*data).data.remove(&id);
             }
-        });
+        }, false);
     }
 }

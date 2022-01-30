@@ -32,7 +32,8 @@ use std::cell::RefCell;
 use std::path::PathBuf;
 use std::rc::Rc;
 use std::sync::{Mutex, RwLock, RwLockReadGuard};
-use std::thread;
+use std::{thread, time};
+use std::collections::vec_deque::VecDeque;
 use conrod_core::text;
 use glium::{glutin::{dpi, event, event_loop, window, ContextBuilder}, Display};
 use glium::Surface;
@@ -61,6 +62,8 @@ struct CmdLineArgs {
 const FONT_DATA: &[u8] = include_bytes!("../res/MinecraftRegular-Bmg3.ttf");
 const ICON_DATA: &[u8] = include_bytes!("../res/icon_32x32.png");
 
+const MSPT: u64 = 1000 / 60;
+
 thread_local! {
     static ICON: Icon = {
         let image = image::load_from_memory_with_format(ICON_DATA, image::ImageFormat::Png).unwrap();
@@ -70,10 +73,15 @@ thread_local! {
 
 lazy_static! {
     static ref QUEUED_TASKS: Mutex<Vec<Box<dyn FnOnce() + Send + 'static>>> = Mutex::new(Vec::new());
+    static ref NON_URGENT_QUEUED_TASKS: Mutex<VecDeque<Box<dyn FnOnce() + Send + 'static>>> = Mutex::new(VecDeque::new());
 }
 
 pub fn add_queued_task(task: impl FnOnce() + Send + 'static) {
     QUEUED_TASKS.lock().unwrap().push(Box::new(task));
+}
+
+pub fn add_non_urgent_queued_task(task: impl FnOnce() + Send + 'static) {
+    NON_URGENT_QUEUED_TASKS.lock().unwrap().push_back(Box::new(task));
 }
 
 enum Request<'a, 'b: 'a> {
@@ -117,7 +125,7 @@ where
             (glium::glutin::event::Event::NewEvents(glium::glutin::event::StartCause::Init { .. }), _)
             | (glium::glutin::event::Event::NewEvents(glium::glutin::event::StartCause::ResumeTimeReached { .. }), _)
             | (glium::glutin::event::Event::MainEventsCleared, true) => {
-                next_update = Some(std::time::Instant::now() + std::time::Duration::from_millis(16));
+                next_update = Some(std::time::Instant::now() + std::time::Duration::from_millis(MSPT));
                 ui_update_needed = false;
                 let mut needs_redraw = false;
                 callback(Request::SetUi {
@@ -228,6 +236,7 @@ fn main() {
                 }
             },
             Request::SetUi { needs_redraw } => {
+                let start_time = time::Instant::now();
                 {
                     let mut queued_tasks = QUEUED_TASKS.lock().unwrap();
                     for task in queued_tasks.drain(..) {
@@ -242,6 +251,13 @@ fn main() {
                     let worlds = world::WORLDS.read().unwrap();
                     worlds.iter().any(|world| world.renderer.has_changed())
                 };
+                {
+                    let mut non_urgent_queued_tasks = NON_URGENT_QUEUED_TASKS.lock().unwrap();
+                    while !non_urgent_queued_tasks.is_empty() && time::Instant::now() - start_time < time::Duration::from_millis(MSPT) {
+                        let task = non_urgent_queued_tasks.pop_front().unwrap();
+                        task();
+                    }
+                }
             },
             Request::Redraw => {
                 let primitives = my_ui.draw();

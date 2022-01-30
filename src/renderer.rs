@@ -684,7 +684,7 @@ impl WorldRenderer {
                 transparency: Transparency::Opaque,
                 cull_mask: [!IVec4::ZERO, !IVec4::ZERO],
             },
-            Some(geom::Direction::NegX) => BakedModelFace {
+            Some(geom::Direction::PosX) => BakedModelFace {
                 vertices: vec![
                     BakedModelVertex {
                         position: [1.0, 0.0, 0.0],
@@ -711,7 +711,7 @@ impl WorldRenderer {
                 transparency: Transparency::Opaque,
                 cull_mask: [!IVec4::ZERO, !IVec4::ZERO],
             },
-            Some(geom::Direction::PosX) => BakedModelFace {
+            Some(geom::Direction::NegX) => BakedModelFace {
                 vertices: vec![
                     BakedModelVertex {
                         position: [0.0, 0.0, 1.0],
