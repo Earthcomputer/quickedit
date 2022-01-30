@@ -31,7 +31,7 @@ extern crate native_dialog;
 use std::cell::RefCell;
 use std::path::PathBuf;
 use std::rc::Rc;
-use std::sync::Mutex;
+use std::sync::{Mutex, RwLock, RwLockReadGuard};
 use std::thread;
 use conrod_core::text;
 use glium::{glutin::{dpi, event, event_loop, window, ContextBuilder}, Display};
@@ -39,6 +39,7 @@ use glium::Surface;
 use image::GenericImageView;
 use lazy_static::lazy_static;
 use winit::window::Icon;
+use serde::{Deserialize, Serialize};
 use structopt::StructOpt;
 use crate::fname::CommonFNames;
 use crate::ui::UiState;
@@ -56,9 +57,6 @@ struct CmdLineArgs {
     #[structopt(short = "w", long = "world")]
     world: Option<PathBuf>,
 }
-
-const WIDTH: f64 = 1920.0;
-const HEIGHT: f64 = 1080.0;
 
 const FONT_DATA: &[u8] = include_bytes!("../res/MinecraftRegular-Bmg3.ttf");
 const ICON_DATA: &[u8] = include_bytes!("../res/icon_32x32.png");
@@ -152,7 +150,7 @@ fn main() {
     let wb = window::WindowBuilder::new()
         .with_title("QuickEdit")
         .with_window_icon(Some(ICON.with(|i| i.clone())))
-        .with_inner_size(dpi::LogicalSize::new(WIDTH, HEIGHT));
+        .with_inner_size(dpi::LogicalSize::new(get_config().window_width as f64, get_config().window_height as f64));
     let cb = ContextBuilder::new().with_depth_buffer(24);
     let display = Display::new(wb, cb, &event_loop).unwrap();
 
@@ -166,7 +164,7 @@ fn main() {
     }
     gl::load_with(|s| display.gl_window().get_proc_address(s) as *const _);
 
-    if let Some(world_folder) = args.world {
+    if let Some(world_folder) = args.world.or_else(|| get_config().auto_open_world.clone()) {
         struct CmdLineInteractionHandler;
         impl minecraft::DownloadInteractionHandler for CmdLineInteractionHandler {
             fn show_download_prompt(&mut self, mc_version: &str) -> bool {
@@ -195,7 +193,7 @@ fn main() {
         worlds.push(world);
     }
 
-    let mut my_ui = conrod_core::UiBuilder::new([WIDTH, HEIGHT]).build();
+    let mut my_ui = conrod_core::UiBuilder::new([get_config().window_width as f64, get_config().window_height as f64]).build();
     let image_map = conrod_core::image::Map::<glium::texture::Texture2d>::new();
     let mut renderer = conrod_glium::Renderer::new(&display).unwrap();
 
@@ -266,4 +264,59 @@ fn main() {
             renderer::clear_display();
         }
     });
+}
+
+lazy_static! {
+    static ref CONFIG: RwLock<Config> = {
+        RwLock::new(match std::fs::File::open("quickedit_config.json") {
+            Ok(file) => {
+                serde_json::from_reader(file).unwrap_or_else(|err| {
+                    eprintln!("Failed to load config: {}", err);
+                    Config::default()
+                })
+            },
+            Err(e) => {
+                if e.kind() != std::io::ErrorKind::NotFound {
+                    eprintln!("Failed to open config file: {}", e);
+                }
+                Config::default()
+            },
+        })
+    };
+}
+
+pub fn get_config() -> RwLockReadGuard<'static, Config> {
+    CONFIG.read().unwrap()
+}
+
+pub fn modify_config(f: impl FnOnce(&mut Config)) {
+    let mut config = CONFIG.write().unwrap();
+    f(&mut *config);
+    let json = serde_json::to_string_pretty(&*config).unwrap();
+    if let Err(e) = std::fs::write("quickedit_config.json", json) {
+        eprintln!("Failed to save config: {}", e);
+    }
+}
+
+#[derive(Deserialize, Serialize)]
+#[serde(default)]
+pub struct Config {
+    pub window_width: u32,
+    pub window_height: u32,
+    pub last_open_path: PathBuf,
+    pub auto_open_world: Option<PathBuf>,
+}
+
+impl Default for Config {
+    fn default() -> Config {
+        Config {
+            window_width: 1920,
+            window_height: 1080,
+            last_open_path: minecraft::get_dot_minecraft()
+                .map(|p| p.join("saves"))
+                .filter(|p| p.exists())
+                .unwrap_or_else(|| PathBuf::from(".")),
+            auto_open_world: None,
+        }
+    }
 }

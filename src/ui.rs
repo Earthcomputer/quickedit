@@ -1,4 +1,3 @@
-use std::path::PathBuf;
 use conrod_core::{Colorable, event, input, Labelable, Positionable, Sizeable, widget, Widget, widget_ids};
 use glam::{DMat2, DVec2};
 use winit::dpi;
@@ -62,9 +61,14 @@ pub fn set_ui(state: &UiState, ui: &mut conrod_core::UiCell) {
 }
 
 fn open_clicked() {
-    let dot_minecraft = minecraft::get_dot_minecraft().unwrap_or_else(|| PathBuf::from("."));
-    let path = native_dialog::FileDialog::new().set_location(&dot_minecraft).show_open_single_dir();
+    let location = crate::get_config().last_open_path.clone();
+    let path = native_dialog::FileDialog::new().set_location(&location).show_open_single_dir();
     if let Ok(Some(path)) = path {
+        if let Some(parent_path) = path.parent() {
+            crate::modify_config(|config| {
+                config.last_open_path = parent_path.to_path_buf();
+            });
+        }
         let mut interaction_handler = UiInteractionHandler{};
         let executor = async_executor::LocalExecutor::new();
         let task = executor.spawn(async { world::World::load(path, &mut interaction_handler) });
