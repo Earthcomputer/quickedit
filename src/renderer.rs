@@ -8,7 +8,7 @@ use num_traits::FloatConst;
 use crate::{blocks, CommonFNames, geom, make_a_hash_map, util};
 use crate::geom::{BlockPos, ChunkPos, DVec3Extensions, IVec3Extensions, IVec3RangeExtensions, IVec2RangeExtensions};
 use crate::resources::{Resources, TextureAtlas};
-use crate::util::{BlitVertex, Lerp};
+use crate::util::{BlitVertex, Lerp, MainThreadStore};
 use crate::world::{Chunk, Dimension, IBlockState, World, WorldRef};
 use crate::add_queued_task;
 
@@ -365,7 +365,7 @@ impl WorldRenderer {
                 },
             };
             let mut dest_baked_geometry = subchunk.baked_geometry.lock().unwrap();
-            *dest_baked_geometry = Some(baked_geometry);
+            *dest_baked_geometry = Some(MainThreadStore::new(baked_geometry));
         });
     }
 

@@ -32,6 +32,7 @@ use std::cell::RefCell;
 use std::path::PathBuf;
 use std::rc::Rc;
 use std::sync::Mutex;
+use std::thread;
 use conrod_core::text;
 use glium::{glutin::{dpi, event, event_loop, window, ContextBuilder}, Display};
 use glium::Surface;
@@ -88,6 +89,8 @@ enum Request<'a, 'b: 'a> {
     },
     Redraw,
 }
+
+pub static mut MAIN_THREAD: Option<thread::ThreadId> = None;
 
 fn run_loop<F>(display: Display, event_loop: event_loop::EventLoop<()>, _ui_state: Rc<RefCell<UiState>>, mut callback: F) -> !
 where
@@ -152,6 +155,12 @@ fn main() {
         .with_inner_size(dpi::LogicalSize::new(WIDTH, HEIGHT));
     let cb = ContextBuilder::new().with_depth_buffer(24);
     let display = Display::new(wb, cb, &event_loop).unwrap();
+
+    let _main_thread_data = unsafe {
+        MAIN_THREAD = Some(thread::current().id());
+        util::MainThreadData::new()
+    };
+
     unsafe {
         renderer::set_display(&display);
     }

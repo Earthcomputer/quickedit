@@ -1,11 +1,16 @@
+use std::any::Any;
 use std::fmt;
 use std::fmt::Formatter;
 use std::hash::Hash;
+use std::ops::{Deref, DerefMut};
 use std::path::{Path, PathBuf};
 use std::str::FromStr;
+use std::sync::atomic::{AtomicUsize, Ordering};
+use ahash::AHashMap;
 use dashmap::DashMap;
 use delegate::delegate;
 use glium::implement_vertex;
+use lazy_static::lazy_static;
 use rayon::prelude::*;
 use serde::Deserialize;
 use serde_with::{DeserializeFromStr, SerializeDisplay};
@@ -324,4 +329,119 @@ where
 #[inline]
 pub unsafe fn extend_lifetime<T>(t: &T) -> &'static T {
     std::mem::transmute(t)
+}
+
+lazy_static! {
+    static ref NEXT_MAIN_THREAD_STORE_ID: AtomicUsize = AtomicUsize::new(0);
+}
+
+
+static mut MAIN_THREAD_DATA: Option<*mut MainThreadData> = None;
+
+pub(crate) struct MainThreadData {
+    data: AHashMap<usize, Box<dyn Any>>,
+}
+
+impl MainThreadData {
+    pub(crate) fn new() -> Self {
+        let mut data = Self {
+            data: AHashMap::new(),
+        };
+        unsafe {
+            MAIN_THREAD_DATA = Some(&mut data);
+        }
+        data
+    }
+}
+
+pub struct MainThreadStore<T: 'static> {
+    id: usize,
+    phantom: std::marker::PhantomData<T>,
+}
+
+impl<T: 'static> MainThreadStore<T> {
+    fn is_on_main_thread() -> bool {
+        let main_thread = unsafe { crate::MAIN_THREAD.unwrap() };
+        std::thread::current().id() == main_thread
+    }
+
+    fn run_on_main_thread(f: impl FnOnce() + Send + 'static) {
+        if Self::is_on_main_thread() {
+            f();
+        } else {
+            crate::add_queued_task(f);
+        }
+    }
+
+    pub fn new(value: T) -> Self {
+        #[cfg(debug_assertions)]
+        assert!(Self::is_on_main_thread());
+
+        let id = NEXT_MAIN_THREAD_STORE_ID.fetch_add(1, Ordering::Relaxed);
+        unsafe {
+            let data = MAIN_THREAD_DATA.unwrap();
+            (*data).data.insert(id, Box::new(value));
+        }
+        Self {
+            id,
+            phantom: std::marker::PhantomData,
+        }
+    }
+
+    pub fn create(ctor: impl (FnOnce() -> T) + Send + 'static) -> Self {
+        let id = NEXT_MAIN_THREAD_STORE_ID.fetch_add(1, Ordering::Relaxed);
+        let data = Self {
+            id,
+            phantom: std::marker::PhantomData,
+        };
+        Self::run_on_main_thread(move || {
+            unsafe {
+                let data = MAIN_THREAD_DATA.unwrap();
+                (*data).data.insert(id, Box::new(ctor()));
+            }
+        });
+        data
+    }
+}
+
+impl<T: 'static + Default> Default for MainThreadStore<T> {
+    fn default() -> Self {
+        Self::create(Default::default)
+    }
+}
+
+impl<T: 'static> Deref for MainThreadStore<T> {
+    type Target = T;
+
+    fn deref(&self) -> &T {
+        #[cfg(debug_assertions)]
+        assert!(Self::is_on_main_thread());
+        unsafe {
+            let data = MAIN_THREAD_DATA.unwrap();
+            (*data).data.get(&self.id).unwrap().downcast_ref_unchecked::<T>()
+        }
+    }
+}
+
+impl<T: 'static> DerefMut for MainThreadStore<T> {
+    fn deref_mut(&mut self) -> &mut T {
+        #[cfg(debug_assertions)]
+        assert!(Self::is_on_main_thread());
+        unsafe {
+            let data = MAIN_THREAD_DATA.unwrap();
+            (*data).data.get_mut(&self.id).unwrap().downcast_mut_unchecked::<T>()
+        }
+    }
+}
+
+impl<T: 'static> Drop for MainThreadStore<T> {
+    fn drop(&mut self) {
+        let id = self.id;
+        Self::run_on_main_thread(move || {
+            unsafe {
+                let data = MAIN_THREAD_DATA.unwrap();
+                (*data).data.remove(&id);
+            }
+        });
+    }
 }

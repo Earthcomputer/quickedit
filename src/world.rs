@@ -1,11 +1,12 @@
 use std::{fmt, fs, io, mem, time};
 use std::collections::btree_map::BTreeMap;
 use std::collections::hash_map::DefaultHasher;
+use std::collections::vec_deque::VecDeque;
 use std::fmt::Formatter;
 use std::hash::{Hash, Hasher};
 use std::io::{Cursor, ErrorKind};
 use std::mem::MaybeUninit;
-use std::ops::{Deref, DerefMut};
+use std::ops::Deref;
 use std::path::PathBuf;
 use std::sync::{Arc, Condvar, Mutex, RwLock};
 use std::sync::atomic::{AtomicBool, Ordering};
@@ -19,10 +20,10 @@ use lazy_static::lazy_static;
 use num_integer::Integer;
 use positioned_io_preview::{RandomAccessFile, ReadAt, ReadBytesAtExt};
 use crate::fname::{CommonFNames, FName};
-use crate::{minecraft, renderer, util};
+use crate::{minecraft, renderer};
 use crate::geom::{BlockPos, ChunkPos, IVec2RangeExtensions};
 use crate::resources;
-use crate::util::{FastDashMap, make_fast_dash_map};
+use crate::util::{FastDashMap, MainThreadStore, make_fast_dash_map};
 use crate::renderer::WorldRenderer;
 
 lazy_static! {
@@ -184,7 +185,7 @@ pub struct Subchunk {
     biome_data: RwLock<BiomeData>,
 
     pub needs_redraw: AtomicBool,
-    pub baked_geometry: Mutex<Option<renderer::BakedChunkGeometry>>,
+    pub baked_geometry: Mutex<Option<MainThreadStore<renderer::BakedChunkGeometry>>>,
 }
 
 impl Subchunk {
@@ -263,7 +264,7 @@ impl Dimension {
         Dimension {
             id,
             min_y: 0,
-            max_y: 256,
+            max_y: 255,
             chunks: make_fast_dash_map(),
             region_file_cache: make_fast_dash_map(),
             chunk_existence_cache: make_fast_dash_map(),
@@ -317,8 +318,8 @@ impl Dimension {
         }).ok()
     }
 
-    pub fn unload_chunk(&self, _world: &World, pos: ChunkPos) {
-        self.chunks.remove(&pos);
+    pub fn unload_chunk(&self, _world: &World, pos: ChunkPos) -> bool {
+        self.chunks.remove(&pos).is_some()
     }
 
     pub fn does_chunk_exist(&self, world: &World, pos: ChunkPos) -> bool {
@@ -481,6 +482,7 @@ fn chunk_loader(world: &World, stop: &dyn Fn() -> bool) {
     let render_distance = 16;
     let mut prev_dimension: Option<FName> = None;
     let mut prev_chunk_pos = None;
+    let mut chunks_to_unload = VecDeque::new();
 
     'outer_loop:
     while !stop() {
@@ -491,22 +493,12 @@ fn chunk_loader(world: &World, stop: &dyn Fn() -> bool) {
         };
         if prev_dimension.as_ref() != Some(&dimension) {
             if let Some(prev_dimension) = prev_dimension {
-                if let Some(prev_dimension) = world.get_dimension(&prev_dimension) {
-                    for chunk_pos in ((prev_chunk_pos.unwrap() - ChunkPos::new(render_distance, render_distance))..=(prev_chunk_pos.unwrap() + ChunkPos::new(render_distance, render_distance))).iter() {
-                        prev_dimension.unload_chunk(world, chunk_pos);
-                    }
+                for chunk_pos in ((prev_chunk_pos.unwrap() - ChunkPos::new(render_distance, render_distance))..=(prev_chunk_pos.unwrap() + ChunkPos::new(render_distance, render_distance))).iter() {
+                    chunks_to_unload.push_back((prev_dimension.clone(), chunk_pos));
                 }
             }
             prev_dimension = Some(dimension.clone());
         }
-
-        let dimension = match world.get_dimension(&dimension) {
-            Some(dimension) => dimension,
-            None => {
-                World::worker_yield();
-                continue
-            },
-        };
 
         let chunk_pos = pos.xz().floor().as_ivec2() >> 4;
 
@@ -516,12 +508,29 @@ fn chunk_loader(world: &World, stop: &dyn Fn() -> bool) {
                     let delta: IVec2 = cp - chunk_pos;
                     let distance = delta.abs().max_element();
                     if distance > render_distance {
-                        dimension.unload_chunk(world, cp);
+                        chunks_to_unload.push_back((dimension.clone(), cp));
                     }
                 }
             }
             prev_chunk_pos = Some(chunk_pos);
         }
+
+        while !chunks_to_unload.is_empty() {
+            let (dimension, chunk_pos) = chunks_to_unload.pop_front().unwrap();
+            if let Some(dimension) = world.get_dimension(&dimension) {
+                if dimension.unload_chunk(world, chunk_pos) {
+                    break;
+                }
+            }
+        }
+
+        let dimension = match world.get_dimension(&dimension) {
+            Some(dimension) => dimension,
+            None => {
+                World::worker_yield();
+                continue
+            },
+        };
 
         for chunk_pos in ((chunk_pos - ChunkPos::new(render_distance, render_distance))..=(chunk_pos + ChunkPos::new(render_distance, render_distance))).iter() {
             if dimension.get_chunk(chunk_pos).is_none()
@@ -545,8 +554,8 @@ pub struct World {
     pub camera: RwLock<Camera>,
     level_dat: LevelDat,
     path: PathBuf,
-    pub resources: resources::Resources,
-    pub renderer: WorldRenderer,
+    pub resources: Arc<resources::Resources>,
+    pub renderer: MainThreadStore<WorldRenderer>,
     dimensions: FastDashMap<FName, Arc<Dimension>>,
 }
 
@@ -556,10 +565,14 @@ impl World {
         let level_dat: LevelDat = nbt::from_gzip_reader(fs::File::open(level_dat)?)?;
         let mc_version = level_dat.data.version.as_ref().map(|v| &v.name).unwrap_or(&minecraft::ABSENT_MINECRAFT_VERSION.to_string()).clone();
         let resources = match resources::Resources::load(&mc_version, &Vec::new(), interaction_handler) {
-            Some(r) => r,
+            Some(r) => Arc::new(r),
             None => return Err(io::Error::new(io::ErrorKind::Other, "Failed to load resources")),
         };
-        let renderer = WorldRenderer::new(&mc_version, &resources);
+        let renderer = {
+            let mc_version = mc_version.clone();
+            let resources = resources.clone();
+            MainThreadStore::create(move || WorldRenderer::new(&mc_version, &*resources))
+        };
         let world = World {
             camera: RwLock::new(Camera {
                 dimension: CommonFNames.OVERWORLD.clone(),
@@ -575,7 +588,7 @@ impl World {
         };
         let mut overworld = Dimension::new(CommonFNames.OVERWORLD.clone());
         overworld.min_y = -64;
-        overworld.max_y = 384;
+        overworld.max_y = 383;
         world.dimensions.insert(CommonFNames.OVERWORLD.clone(), Arc::new(overworld));
         world.dimensions.insert(CommonFNames.THE_NETHER.clone(), Arc::new(Dimension::new(CommonFNames.THE_NETHER.clone())));
         world.dimensions.insert(CommonFNames.THE_END.clone(), Arc::new(Dimension::new(CommonFNames.THE_END.clone())));
@@ -606,8 +619,8 @@ impl World {
 
 pub struct WorldRef {
     thread_pool: rayon::ThreadPool,
-    world: Box<World>,
-    dropping: bool,
+    world: Arc<World>,
+    dropping: Arc<AtomicBool>,
 }
 unsafe impl Send for WorldRef {}
 unsafe impl Sync for WorldRef {}
@@ -615,8 +628,8 @@ impl WorldRef {
     fn new(world: World) -> Self {
         Self {
             thread_pool: rayon::ThreadPoolBuilder::new().num_threads((num_cpus::get() - 1).max(4)).build().unwrap(),
-            world: Box::new(world),
-            dropping: false,
+            world: Arc::new(world),
+            dropping: Arc::new(AtomicBool::new(false)),
         }
     }
 
@@ -625,10 +638,11 @@ impl WorldRef {
         where
             F: FnOnce(&World, &dyn Fn() -> bool) + Send + 'static,
     {
-        let static_self = util::extend_lifetime(self);
+        let world = self.world.clone();
+        let dropping = self.dropping.clone();
         self.thread_pool.spawn(move || {
-            if !static_self.dropping {
-                job(&*static_self.world, &(|| static_self.dropping));
+            if !dropping.load(Ordering::Relaxed) {
+                job(&*world, &(|| dropping.load(Ordering::Relaxed)));
             }
         });
     }
@@ -639,15 +653,9 @@ impl Deref for WorldRef {
         &*self.world
     }
 }
-impl DerefMut for WorldRef {
-    fn deref_mut(&mut self) -> &mut World {
-        &mut *self.world
-    }
-}
 impl Drop for WorldRef {
     fn drop(&mut self) {
-        println!("Dropping world");
-        self.dropping = true;
+        self.dropping.store(true, Ordering::Relaxed);
     }
 }
 
