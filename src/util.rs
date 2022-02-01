@@ -368,12 +368,10 @@ impl<T: 'static> MainThreadStore<T> {
     fn run_on_main_thread(f: impl FnOnce() + Send + 'static, urgent: bool) {
         if Self::is_on_main_thread() {
             f();
+        } else if urgent {
+            crate::add_queued_task(f);
         } else {
-            if urgent {
-                crate::add_queued_task(f);
-            } else {
-                crate::add_non_urgent_queued_task(f);
-            }
+            crate::add_non_urgent_queued_task(f);
         }
     }
 
@@ -407,6 +405,9 @@ impl<T: 'static> MainThreadStore<T> {
         data
     }
 }
+
+unsafe impl<T: 'static> Send for MainThreadStore<T> {}
+unsafe impl<T: 'static> Sync for MainThreadStore<T> {}
 
 impl<T: 'static + Default> Default for MainThreadStore<T> {
     fn default() -> Self {

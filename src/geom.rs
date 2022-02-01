@@ -3,62 +3,48 @@ use serde::Deserialize;
 pub type ChunkPos = glam::IVec2;
 pub type BlockPos = glam::IVec3;
 
-macro_rules! glam_conversions {
-    ($t:ty, $extensions:ident, $(($to_name:ident, $into_name:ident, $to_glam:ty, ($($field:ident, $to_elem:ty),*))),*) => {
+macro_rules! glam_extensions {
+    ($t:ty, $elem:ident, $extensions:ident, $($field:ident),*) => {
         pub trait $extensions {
-            $(
-                fn $to_name(&self) -> $to_glam;
-                fn $into_name(self) -> $to_glam;
-            )*
+            fn square_range(&self, range: $elem) -> std::ops::RangeInclusive<$t>;
+            fn taxicab_length(&self) -> $elem;
+            fn taxicab_distance(&self, other: $t) -> $elem;
+            fn rectangular_length(&self) -> $elem;
+            fn rectangular_distance(&self, other: $t) -> $elem;
         }
         impl $extensions for $t {
-            $(
-                fn $to_name(&self) -> $to_glam {
-                    <$to_glam>::new($(self.$field as $to_elem),*)
-                }
-                fn $into_name(self) -> $to_glam {
-                    <$to_glam>::new($(self.$field as $to_elem),*)
-                }
-            )*
+            fn square_range(&self, range: $elem) -> std::ops::RangeInclusive<$t> {
+                (*self - Self::ONE * range)..=(*self + Self::ONE * range)
+            }
+            fn taxicab_length(&self) -> $elem {
+                use num_traits::identities::Zero;
+                $(self.$field.abs() +)* $elem::zero()
+            }
+            fn taxicab_distance(&self, other: $t) -> $elem {
+                (*self - other).taxicab_length()
+            }
+            fn rectangular_length(&self) -> $elem {
+                use num_traits::identities::Zero;
+                let mut max = $elem::zero();
+                $(max = max.max(self.$field.abs());)*
+                max
+            }
+            fn rectangular_distance(&self, other: $t) -> $elem {
+                (*self - other).rectangular_length()
+            }
         }
     }
 }
-glam_conversions!(glam::IVec2, IVec2Extensions,
-    (to_float, into_float, glam::Vec2, (x, f32, y, f32)),
-    (to_double, into_double, glam::DVec2, (x, f64, y, f64))
-);
-glam_conversions!(glam::Vec2, Vec2Extensions,
-    (to_int, into_int, glam::IVec2, (x, i32, y, i32)),
-    (to_double, into_double, glam::DVec2, (x, f64, y, f64))
-);
-glam_conversions!(glam::DVec2, DVec2Extensions,
-    (to_int, into_int, glam::IVec2, (x, i32, y, i32)),
-    (to_float, into_float, glam::Vec2, (x, f32, y, f32))
-);
-glam_conversions!(glam::IVec3, IVec3Extensions,
-    (to_float, into_float, glam::Vec3, (x, f32, y, f32, z, f32)),
-    (to_double, into_double, glam::DVec3, (x, f64, y, f64, z, f64))
-);
-glam_conversions!(glam::Vec3, Vec3Extensions,
-    (to_int, into_int, glam::IVec3, (x, i32, y, i32, z, i32)),
-    (to_double, into_double, glam::DVec3, (x, f64, y, f64, z, f64))
-);
-glam_conversions!(glam::DVec3, DVec3Extensions,
-    (to_int, into_int, glam::IVec3, (x, i32, y, i32, z, i32)),
-    (to_float, into_float, glam::Vec3, (x, f32, y, f32, z, f32))
-);
-glam_conversions!(glam::IVec4, IVec4Extensions,
-    (to_float, into_float, glam::Vec4, (x, f32, y, f32, z, f32, w, f32)),
-    (to_double, into_double, glam::DVec4, (x, f64, y, f64, z, f64, w, f64))
-);
-glam_conversions!(glam::Vec4, Vec4Extensions,
-    (to_int, into_int, glam::IVec4, (x, i32, y, i32, z, i32, w, i32)),
-    (to_double, into_double, glam::DVec4, (x, f64, y, f64, z, f64, w, f64))
-);
-glam_conversions!(glam::DVec4, DVec4Extensions,
-    (to_int, into_int, glam::IVec4, (x, i32, y, i32, z, i32, w, i32)),
-    (to_float, into_float, glam::Vec4, (x, f32, y, f32, z, f32, w, f32))
-);
+glam_extensions!(glam::IVec2, i32, IVec2Extensions, x, y);
+glam_extensions!(glam::Vec2, f32, Vec2Extensions, x, y);
+glam_extensions!(glam::DVec2, f64, DVec2Extensions, x, y);
+glam_extensions!(glam::IVec3, i32, IVec3Extensions, x, y, z);
+glam_extensions!(glam::Vec3, f32, Vec3Extensions, x, y, z);
+glam_extensions!(glam::DVec3, f64, DVec3Extensions, x, y, z);
+glam_extensions!(glam::IVec4, i32, IVec4Extensions, x, y, z, w);
+glam_extensions!(glam::Vec4, f32, Vec4Extensions, x, y, z, w);
+glam_extensions!(glam::DVec4, f64, DVec4Extensions, x, y, z, w);
+
 macro_rules! float_range_impl {
     ($t:ty, $ext:ident, $($field:ident),*) => {
         pub trait $ext {
@@ -103,11 +89,6 @@ macro_rules! float_range_impl {
             }
         }
     }
-}
-trait IntoIteratorHack : IntoIterator {
-    type Item;
-    type IntoIter;
-    fn into_iter(self) -> <Self as IntoIteratorHack>::IntoIter;
 }
 macro_rules! int_range_impl {
     ($t:ty, $ext:ident, $iter:ident, $($field:ident),*) => {
@@ -351,14 +332,14 @@ impl Direction {
 
     pub fn from_vector(vector: glam::Vec3) -> Self {
         return *Direction::ALL.iter().max_by(|dir1, dir2| {
-            let dir1_dot = vector.dot(dir1.forward().to_float());
-            let dir2_dot = vector.dot(dir2.forward().to_float());
+            let dir1_dot = vector.dot(dir1.forward().as_vec3());
+            let dir2_dot = vector.dot(dir2.forward().as_vec3());
             dir1_dot.partial_cmp(&dir2_dot).unwrap()
         }).unwrap();
     }
 
     pub fn transform(self, transform: &glam::Mat4) -> Self {
-        let forward = self.forward().to_float();
+        let forward = self.forward().as_vec3();
         let forward_transformed = transform.transform_vector3(forward);
         return Direction::from_vector(forward_transformed);
     }
