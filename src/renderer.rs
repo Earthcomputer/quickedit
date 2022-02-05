@@ -467,20 +467,19 @@ impl WorldRenderer {
             let yaw = yaw.to_radians();
             glam::DVec2::new(-yaw.sin() as f64, -yaw.cos() as f64)
         }
-        let camera_pos = camera_pos;
         let left_normal = get_forward_vector(yaw - 90.0f32 + fov);
         let right_normal = get_forward_vector(yaw + 90.0f32 - fov);
         let min_left_dot = left_normal.dot(camera_pos.xz());
         let min_right_dot = right_normal.dot(camera_pos.xz());
 
-        self.render_existing_chunks(world, &*dimension, target, &uniforms(camera_pos.xz().floor().as_ivec2()), current_chunk);
+        self.render_existing_chunks(world, &*dimension, target, &uniforms(current_chunk), current_chunk);
 
         let mut chunks_to_render = Vec::new();
 
         for chunk_pos in current_chunk.square_range(render_distance_chunks as i32).iter() {
             let mut is_in_view = false;
             for delta in (IVec2::ZERO..=IVec2::ONE).iter() {
-                let corner_pos = (chunk_pos + delta).as_dvec2();
+                let corner_pos = ((chunk_pos + delta) << 4i8).as_dvec2();
                 if left_normal.dot(corner_pos) >= min_left_dot && right_normal.dot(corner_pos) >= min_right_dot {
                     is_in_view = true;
                     break;
@@ -581,55 +580,53 @@ impl WorldRenderer {
 
     fn render_state(world: &World, dimension: &Dimension, state: &IBlockState, pos: BlockPos, world_pos: BlockPos, out_geometry: &mut SubchunkGeometry) {
         let color = blocks::get_block_color(world, dimension, world_pos, state);
-        WorldRenderer::with_baked_model(world, state, |baked_model| {
-            for (dir, face) in &baked_model.faces {
-                if let Some(dir) = dir {
-                    if let Some(neighbor) = dimension.get_block_state(world_pos + dir.forward()) {
-                        let mut culling = false;
-                        WorldRenderer::with_baked_model(world, &neighbor, |neighbor_model| {
-                            if let Some(neighbor_face) = neighbor_model.faces.get(&Some(dir.opposite())) {
-                                if (face.cull_mask[0] & !neighbor_face.cull_mask[0]) == IVec4::ZERO && (face.cull_mask[1] & !neighbor_face.cull_mask[1]) == IVec4::ZERO {
-                                    culling = true;
-                                }
-                            }
-                        });
-                        if culling {
-                            continue;
+        let baked_model = WorldRenderer::get_baked_model(world, state);
+        for (dir, face) in &baked_model.faces {
+            if let Some(dir) = dir {
+                if let Some(neighbor) = dimension.get_block_state(world_pos + dir.forward()) {
+                    let mut culling = false;
+                    let neighbor_model = WorldRenderer::get_baked_model(world, &neighbor);
+                    if let Some(neighbor_face) = neighbor_model.faces.get(&Some(dir.opposite())) {
+                        if (face.cull_mask[0] & !neighbor_face.cull_mask[0]) == IVec4::ZERO && (face.cull_mask[1] & !neighbor_face.cull_mask[1]) == IVec4::ZERO {
+                            culling = true;
                         }
                     }
-                }
-                let geom = match face.transparency {
-                    Transparency::Opaque => &mut out_geometry.opaque_geometry,
-                    Transparency::Transparent => &mut out_geometry.transparent_geometry,
-                    Transparency::Translucent => &mut out_geometry.translucent_geometry,
-                };
-                for quad in &face.quads {
-                    let convert_vertex = |vertex: &BakedModelVertex| {
-                        util::Vertex {
-                            position: [
-                                vertex.position[0] + pos.x as f32,
-                                vertex.position[1] + pos.y as f32,
-                                vertex.position[2] + pos.z as f32,
-                            ],
-                            tex_coords: vertex.tex_coords,
-                            lightmap_coords: [1.0, 0.0],
-                            color: if vertex.tint { (color.as_vec3() / 255.0).to_array() } else { [1.0, 1.0, 1.0] },
-                        }
-                    };
-                    geom.quads.push([convert_vertex(&quad[0]), convert_vertex(&quad[1]), convert_vertex(&quad[2]), convert_vertex(&quad[3])]);
+                    if culling {
+                        continue;
+                    }
                 }
             }
-        });
+            let geom = match face.transparency {
+                Transparency::Opaque => &mut out_geometry.opaque_geometry,
+                Transparency::Transparent => &mut out_geometry.transparent_geometry,
+                Transparency::Translucent => &mut out_geometry.translucent_geometry,
+            };
+            for quad in &face.quads {
+                let convert_vertex = |vertex: &BakedModelVertex| {
+                    util::Vertex {
+                        position: [
+                            vertex.position[0] + pos.x as f32,
+                            vertex.position[1] + pos.y as f32,
+                            vertex.position[2] + pos.z as f32,
+                        ],
+                        tex_coords: vertex.tex_coords,
+                        lightmap_coords: [1.0, 0.0],
+                        color: if vertex.tint { (color.as_vec3() / 255.0).to_array() } else { [1.0, 1.0, 1.0] },
+                    }
+                };
+                geom.quads.push([convert_vertex(&quad[0]), convert_vertex(&quad[1]), convert_vertex(&quad[2]), convert_vertex(&quad[3])]);
+            }
+        }
     }
 
-    fn with_baked_model(world: &World, state: &IBlockState, mut f: impl FnMut(&BakedModel)) {
+    fn get_baked_model(world: &World, state: &IBlockState) -> Arc<BakedModel> {
         match world.resources.baked_model_cache.get(state) {
-            Some(model) => f(&*model.value()),
+            Some(model) => model.value().clone(),
             None => {
-                world.resources.baked_model_cache.insert(state.clone(), WorldRenderer::bake_model(world, state));
-                f(&*world.resources.baked_model_cache.get(state).unwrap().value());
+                world.resources.baked_model_cache.insert(state.clone(), Arc::new(WorldRenderer::bake_model(world, state)));
+                world.resources.baked_model_cache.get(state).unwrap().value().clone()
             }
-        };
+        }
     }
 
     fn bake_model(world: &World, state: &IBlockState) -> BakedModel {

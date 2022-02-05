@@ -4,6 +4,7 @@ use std::io::{Cursor, Read};
 use std::iter::FilterMap;
 use std::ops::Deref;
 use std::path::{Path, PathBuf};
+use std::sync::Arc;
 use ahash::{AHashMap, AHashSet};
 use glam::Vec4Swizzles;
 use image::{GenericImage, GenericImageView};
@@ -142,7 +143,7 @@ pub const MISSINGNO_DATA: &[u8] = include_bytes!("../res/missingno.png");
 
 #[derive(Default)]
 pub struct Resources {
-    pub baked_model_cache: FastDashMap<IBlockState, renderer::BakedModel>,
+    pub baked_model_cache: FastDashMap<IBlockState, Arc<renderer::BakedModel>>,
 
     blockstates: AHashMap<FName, BlockstateFile>,
     block_models: AHashMap<FName, BlockModel>,
