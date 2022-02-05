@@ -276,6 +276,7 @@ impl ResourcePack for DirectoryResourcePack {
 }
 
 impl Resources {
+    #[profiling::function]
     fn get_resource_pack(path: &Path) -> io::Result<Box<dyn ResourcePack>> {
         if util::is_dir(path) {
             Ok(Box::new(DirectoryResourcePack::new(path.to_path_buf())))
@@ -285,6 +286,7 @@ impl Resources {
         }
     }
 
+    #[profiling::function]
     fn load_resource_pack(_mc_version: &str, resource_pack: &mut dyn ResourcePack, resources: &mut Resources) {
         for namespace in resource_pack.get_sub_files("assets/", "/") {
             for block_name in resource_pack.get_sub_files(&format!("assets/{}/blockstates/", &namespace), ".json") {
@@ -305,11 +307,13 @@ impl Resources {
         }
     }
 
+    #[profiling::function]
     fn load_resources(mc_version: &str, resource_packs: &mut [Box<dyn ResourcePack>], resources: &mut Resources) {
         Resources::load_models(mc_version, resource_packs, resources);
         Resources::load_textures(mc_version, resource_packs, resources);
     }
 
+    #[profiling::function]
     fn load_models(_mc_version: &str, resource_packs: &mut [Box<dyn ResourcePack>], resources: &mut Resources) {
         let mut models_to_load = AHashSet::new();
         for blockstate in resources.blockstates.values() {
@@ -463,6 +467,7 @@ impl Resources {
         }
     }
 
+    #[profiling::function]
     fn load_textures(_mc_version: &str, resource_packs: &mut [Box<dyn ResourcePack>], resources: &mut Resources) {
         let mut textures = AHashMap::new();
         for model in resources.block_models.values() {
@@ -534,6 +539,7 @@ impl Resources {
         resources.block_atlas = stitch(&textures, &mut resources.mipmap_levels, *MAX_SUPPORTED_TEXTURE_SIZE, *MAX_SUPPORTED_TEXTURE_SIZE).unwrap();
     }
 
+    #[profiling::function]
     fn get_resource<'a>(resource_packs: &'a mut [Box<dyn ResourcePack>], path: &str) -> io::Result<Option<Box<dyn io::Read + 'a>>> {
         for resource_pack in resource_packs {
             match resource_pack.get_reader(path) {
@@ -545,6 +551,7 @@ impl Resources {
         Ok(None)
     }
 
+    #[profiling::function]
     fn load_colormap(resource_packs: &mut [Box<dyn ResourcePack>], typ: &str) -> Option<image::RgbaImage> {
         match Resources::get_resource(resource_packs, format!("assets/minecraft/textures/colormap/{}.png", typ).as_str()) {
             Ok(Some(mut reader)) => {
@@ -595,6 +602,7 @@ impl Resources {
         resources.foliage_colormap = Resources::load_colormap(resource_packs, "foliage");
     }
 
+    #[profiling::function]
     pub fn load(mc_version: &str, resource_packs: &[&PathBuf], interaction_handler: &mut dyn minecraft::DownloadInteractionHandler) -> Option<Resources> {
         let mut resources = Resources::default();
         let mut resource_pack_list: Vec<Box<dyn ResourcePack>> = vec![Box::new(BuiltinResourcePack{})];
@@ -636,6 +644,7 @@ impl Resources {
         Some(resources)
     }
 
+    #[profiling::function]
     pub fn get_block_model(&self, state: &IBlockState) -> Option<Vec<TransformedModel>> {
         let blockstate = self.blockstates.get(&state.block)?;
 
@@ -1058,6 +1067,7 @@ pub struct Sprite {
     pub transparency: renderer::Transparency,
 }
 
+#[profiling::function]
 fn stitch<P: image::Pixel<Subpixel=u8> + 'static, I: image::GenericImageView<Pixel=P>>(
     textures: &AHashMap<FName, I>,
     mipmap_level: &mut u32,
@@ -1227,6 +1237,7 @@ fn stitch<P: image::Pixel<Subpixel=u8> + 'static, I: image::GenericImageView<Pix
     })
 }
 
+#[profiling::function]
 fn calc_transparency<P: image::Pixel<Subpixel=u8>, I: image::GenericImageView<Pixel=P>>(texture: &I) -> renderer::Transparency {
     let mut seen_transparent_pixel = false;
     for (_, _, pixel) in texture.pixels() {

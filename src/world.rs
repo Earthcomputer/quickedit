@@ -143,6 +143,7 @@ macro_rules! define_paletted_data {
                 self.data[bit] |= (val as u64) << (inbit * self.bits_per_block as usize);
             }
 
+            #[profiling::function]
             fn resize(&mut self) {
                 if self.data.is_empty() {
                     self.bits_per_block = $default_palette_size.log2() as u8;
@@ -187,19 +188,23 @@ pub struct Subchunk {
 }
 
 impl Subchunk {
+    #[profiling::function]
     pub fn get_block_state(&self, pos: BlockPos) -> IBlockState {
         self.block_data.read().unwrap().get(pos.x as usize, pos.y as usize, pos.z as usize).clone()
     }
 
+    #[profiling::function]
     pub fn set_block_state(&self, pos: BlockPos, value: &IBlockState) {
         self.block_data.write().unwrap().set(pos.x as usize, pos.y as usize, pos.z as usize, value);
         self.needs_redraw.store(true, Ordering::Release);
     }
 
+    #[profiling::function]
     pub fn get_biome(&self, pos: BlockPos) -> FName {
         self.biome_data.read().unwrap().get(pos.x as usize >> 2, pos.y as usize >> 2, pos.z as usize >> 2).clone()
     }
 
+    #[profiling::function]
     pub fn set_biome(&self, pos: BlockPos, value: &FName) {
         self.biome_data.write().unwrap().set(pos.x as usize >> 2, pos.y as usize >> 2, pos.z as usize >> 2, value);
         self.needs_redraw.store(true, Ordering::Release);
@@ -217,6 +222,7 @@ impl Chunk {
         }
     }
 
+    #[profiling::function]
     pub fn get_block_state(&self, dimension: &Dimension, pos: BlockPos) -> Option<IBlockState> {
         let subchunk_index = (pos.y - dimension.min_y) >> 4;
         if subchunk_index < 0 {
@@ -230,6 +236,7 @@ impl Chunk {
         Some(subchunk.get_block_state(pos & glam::IVec3::new(!0, 15, !0)))
     }
 
+    #[profiling::function]
     pub fn get_biome(&self, dimension: &Dimension, pos: BlockPos) -> Option<FName> {
         let subchunk_index = (pos.y - dimension.min_y) >> 4;
         if subchunk_index < 0 {
@@ -278,22 +285,26 @@ impl Dimension {
         }
     }
 
+    #[profiling::function]
     pub fn get_block_state(&self, pos: BlockPos) -> Option<IBlockState> {
         let chunk = self.get_chunk(pos.xz() >> glam::IVec2::new(4, 4))?;
         chunk.get_block_state(self, pos & glam::IVec3::new(15, !0, 15))
     }
 
+    #[profiling::function]
     pub fn get_biome(&self, pos: BlockPos) -> Option<FName> {
         let chunk = self.get_chunk(pos.xz() >> glam::IVec2::new(4, 4))?;
         chunk.get_biome(self, pos & glam::IVec3::new(15, !0, 15))
     }
 
+    #[profiling::function]
     pub fn get_chunk(&self, pos: ChunkPos) -> Option<Arc<Chunk>> {
         self.chunks.view(&pos, |_, chunk| {
             chunk.clone()
         })
     }
 
+    #[profiling::function]
     pub fn load_chunk(&self, world: &World, pos: ChunkPos) -> Option<Arc<Chunk>> {
         if self.chunk_existence_cache.get(&pos).map(|b| *b) == Some(false) {
             return None;
@@ -313,10 +324,12 @@ impl Dimension {
         }).ok()
     }
 
+    #[profiling::function]
     pub fn unload_chunk(&self, _world: &World, pos: ChunkPos) -> bool {
         self.chunks.remove(&pos).is_some()
     }
 
+    #[profiling::function]
     pub fn does_chunk_exist(&self, world: &World, pos: ChunkPos) -> bool {
         if let Some(exists) = self.chunk_existence_cache.get(&pos) {
             return *exists;
@@ -346,6 +359,7 @@ impl Dimension {
         })
     }
 
+    #[profiling::function]
     fn get_region_file(&self, world: &World, region_pos: IVec2) -> io::Result<dashmap::mapref::one::RefMut<IVec2, (RandomAccessFile, time::SystemTime), ahash::RandomState>> {
         if let Entry::Occupied(entry) = self.region_file_cache.entry(region_pos) {
             return Ok(entry.into_ref());
@@ -366,6 +380,7 @@ impl Dimension {
         Ok(region_file_cache_entry)
     }
 
+    #[profiling::function]
     fn read_chunk(&self, world: &World, pos: ChunkPos) -> io::Result<Option<Chunk>> {
         let serialized_chunk: SerializedChunk = {
             let region_file_cache_entry = match self.get_region_file(world, pos >> 5i8) {
@@ -472,6 +487,7 @@ impl Camera {
     }
 }
 
+#[profiling::function]
 fn chunk_loader(world: Arc<World>, stop: &dyn Fn() -> bool) {
     let render_distance = 16;
     let mut prev_dimension: Option<FName> = None;
@@ -554,6 +570,7 @@ pub struct World {
 }
 
 impl World {
+    #[profiling::function]
     pub fn load(path: PathBuf, interaction_handler: &mut dyn minecraft::DownloadInteractionHandler) -> io::Result<WorldRef> {
         let level_dat = path.join("level.dat");
         let level_dat: LevelDat = nbt::from_gzip_reader(fs::File::open(level_dat)?)?;
@@ -588,10 +605,12 @@ impl World {
         Ok(world)
     }
 
+    #[profiling::function]
     pub fn get_dimension(&self, id: &FName) -> Option<Arc<Dimension>> {
         self.dimensions.view(id, |_, dim| dim.clone())
     }
 
+    #[profiling::function]
     pub fn tick() {
         {
             let mut global_tick_mutex = GLOBAL_TICK_MUTEX.lock().unwrap();
@@ -600,6 +619,7 @@ impl World {
         GLOBAL_TICK_VAR.notify_all();
     }
 
+    #[profiling::function]
     pub fn worker_yield() {
         drop(GLOBAL_TICK_VAR.wait(GLOBAL_TICK_MUTEX.lock().unwrap()).unwrap());
     }
@@ -609,15 +629,35 @@ pub struct WorldRef {
     thread_pool: rayon::ThreadPool,
     world: Arc<World>,
     dropping: Arc<AtomicBool>,
+    num_jobs_semaphore: Arc<(Mutex<usize>, Condvar)>,
 }
 unsafe impl Send for WorldRef {}
 unsafe impl Sync for WorldRef {}
 impl WorldRef {
     fn new(world: World) -> Self {
+        let world_name = world.path.file_name().and_then(|str| str.to_str()).unwrap_or("<unnamed world>").to_string();
         Self {
-            thread_pool: rayon::ThreadPoolBuilder::new().num_threads((num_cpus::get() - 1).max(4)).build().unwrap(),
+            thread_pool: rayon::ThreadPoolBuilder::new()
+                .thread_name(move |idx| format!("WorldWorker-{}-{}", world_name, idx))
+                .spawn_handler(|thread| {
+                    let mut b = std::thread::Builder::new();
+                    if let Some(name) = thread.name() {
+                        b = b.name(name.to_owned());
+                    }
+                    if let Some(stack_size) = thread.stack_size() {
+                        b = b.stack_size(stack_size);
+                    }
+                    b.spawn(|| {
+                        profiling::register_thread!();
+                        thread.run();
+                    })?;
+                    Ok(())
+                })
+                .num_threads((num_cpus::get() - 1).max(4))
+                .build().unwrap(),
             world: Arc::new(world),
             dropping: Arc::new(AtomicBool::new(false)),
+            num_jobs_semaphore: Arc::new((Mutex::new(0), Condvar::new())),
         }
     }
 
@@ -626,9 +666,22 @@ impl WorldRef {
         where
             F: FnOnce(Arc<World>, &dyn Fn() -> bool) + Send + 'static,
     {
+        struct Guard {
+            num_jobs_semaphore: Arc<(Mutex<usize>, Condvar)>,
+        }
+        impl Drop for Guard {
+            fn drop(&mut self) {
+                *self.num_jobs_semaphore.0.lock().unwrap() -= 1;
+                self.num_jobs_semaphore.1.notify_one();
+            }
+        }
+        let num_jobs_guard = Guard{num_jobs_semaphore: self.num_jobs_semaphore.clone()};
+        *self.num_jobs_semaphore.0.lock().unwrap() += 1;
+
         let world = self.world.clone();
         let dropping = self.dropping.clone();
         self.thread_pool.spawn(move || {
+            let _num_jobs_guard = num_jobs_guard;
             if !dropping.load(Ordering::Relaxed) {
                 job(world, &(|| dropping.load(Ordering::Relaxed)));
             }
@@ -642,8 +695,10 @@ impl Deref for WorldRef {
     }
 }
 impl Drop for WorldRef {
+    #[profiling::function]
     fn drop(&mut self) {
         self.dropping.store(true, Ordering::Relaxed);
+        drop(self.num_jobs_semaphore.1.wait_while(self.num_jobs_semaphore.0.lock().unwrap(), |num_jobs| *num_jobs > 0).unwrap());
     }
 }
 

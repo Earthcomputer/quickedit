@@ -1,13 +1,15 @@
 use std::cell::RefCell;
 use std::ops::{Deref, DerefMut};
-use std::sync::{Arc, Mutex, MutexGuard};
+use std::sync::{Arc, Mutex};
 use std::sync::atomic::{AtomicBool, Ordering};
 use ahash::AHashMap;
 use approx::AbsDiffEq;
 use glam::{Affine2, Affine3A, IVec2, IVec3, IVec4, Mat4, Quat, Vec2, Vec3, Vec3Swizzles, Vec4, DVec3};
 use glium::{Frame, Surface, uniform};
+use lazy_static::lazy_static;
 use num_traits::FloatConst;
-use crate::{blocks, CommonFNames, geom, make_a_hash_map, util};
+use crate::{blocks, CommonFNames, geom, make_a_hash_map, profile_mutex, util};
+use crate::debug::{ProfileMutex, ProfileMutexGuard};
 use crate::geom::{BlockPos, ChunkPos, IVec3RangeExtensions, IVec2RangeExtensions, IVec2Extensions};
 use crate::resources::{Resources, TextureAtlas};
 use crate::util::{BlitVertex, FastDashMap, Lerp, MainThreadStore, make_fast_dash_map};
@@ -55,6 +57,12 @@ struct Geometry {
     quads: Vec<Quad<util::Vertex>>,
 }
 
+impl Geometry {
+    fn join_vertices<'a>(geoms: impl Iterator<Item=&'a Geometry>) -> Vec<util::Vertex> {
+        geoms.flat_map(|g| &g.quads).cloned().flatten().collect()
+    }
+}
+
 struct SubchunkGeometry {
     opaque_geometry: Geometry,
     transparent_geometry: Geometry,
@@ -81,88 +89,61 @@ impl SubchunkGeometry {
     }
 }
 
+lazy_static! {
+    static ref SHARED_INDEX_BUFFER: MainThreadStore<RefCell<glium::index::IndexBuffer<u32>>> = MainThreadStore::create(||
+        RefCell::new(glium::IndexBuffer::empty(get_display(), glium::index::PrimitiveType::TrianglesList, 0).unwrap()));
+}
+
+#[derive(Default)]
 struct BakedGeometry {
-    quad_capacity: usize,
-    subchunk_data: Vec<(usize, usize)>, // index, length
-    vertices: glium::VertexBuffer<util::Vertex>,
-    indices: glium::IndexBuffer<u32>,
+    vertices: Option<glium::VertexBuffer<util::Vertex>>,
+    len: usize,
 }
 
 impl BakedGeometry {
-    fn new(display: &glium::Display, subchunk_count: usize, quad_capacity: usize) -> Self {
-        let subchunk_index: Vec<_> = (0..subchunk_count).map(|i| (i * quad_capacity / subchunk_count, 0)).collect();
-        Self {
-            quad_capacity,
-            subchunk_data: subchunk_index,
-            vertices: glium::VertexBuffer::empty_dynamic(display, 4 * quad_capacity).unwrap(),
-            indices: glium::IndexBuffer::empty_dynamic(display, glium::index::PrimitiveType::TrianglesList, 6 * quad_capacity).unwrap(),
-        }
+    #[profiling::function]
+    fn expand_index_buffer(new_size: usize) {
+        let index_buffer: Vec<_> = (0..new_size)
+            .flat_map(|i| {
+                let i = i * 4;
+                [i, i + 1, i + 2, i + 2, i + 3, i]
+            })
+            .map(|i| i as u32)
+            .collect();
+        *SHARED_INDEX_BUFFER.borrow_mut() = glium::IndexBuffer::new(get_display(), glium::index::PrimitiveType::TrianglesList, &index_buffer).unwrap();
     }
 
-    fn modify(&mut self, subchunk_index: usize, vertices: &[util::Vertex], indices: &[u32]) {
-        let capacity = if subchunk_index + 1 == self.subchunk_data.len() {
-            self.quad_capacity - self.subchunk_data[subchunk_index].0
-        } else {
-            self.subchunk_data[subchunk_index + 1].0 - self.subchunk_data[subchunk_index].0
-        };
-        let start = self.subchunk_data[subchunk_index].0;
-        let quad_count = vertices.len() / 4;
-
-        if quad_count > capacity {
-            let shift = quad_count.next_multiple_of(capacity) - capacity;
-            let new_vertices = glium::VertexBuffer::empty_dynamic(get_display(), 4 * (self.quad_capacity + shift)).unwrap();
-            let new_indices = glium::IndexBuffer::empty_dynamic(get_display(), glium::index::PrimitiveType::TrianglesList, 6 * (self.quad_capacity + shift)).unwrap();
-            self.vertices.slice(0..4*start).unwrap().copy_to(new_vertices.slice(0..4*start).unwrap()).unwrap();
-            self.indices.slice(0..6*start).unwrap().copy_to(new_indices.slice(0..6*start).unwrap()).unwrap();
-            if subchunk_index + 1 != self.subchunk_data.len() {
-                self.vertices.slice(4*(start + capacity)..4*self.quad_capacity).unwrap().copy_to(new_vertices.slice(4*(start + capacity + shift)..4*(self.quad_capacity+shift)).unwrap()).unwrap();
-                self.indices.slice(6*(start + capacity)..6*self.quad_capacity).unwrap().copy_to(new_indices.slice(6*(start + capacity + shift)..6*(self.quad_capacity+shift)).unwrap()).unwrap();
+    #[profiling::function]
+    fn set_buffer_data(&mut self, vertices: &[util::Vertex]) {
+        if self.vertices.as_ref().map(|verts| verts.len()).unwrap_or(0) < vertices.len() {
+            self.vertices = Some(glium::VertexBuffer::new(get_display(), vertices).unwrap());
+            if SHARED_INDEX_BUFFER.borrow().len() * 2 < vertices.len() * 3 {
+                BakedGeometry::expand_index_buffer(vertices.len() * 3 / 2);
             }
-            self.vertices = new_vertices;
-            self.indices = new_indices;
-            self.quad_capacity += shift;
-            for i in subchunk_index + 1..self.subchunk_data.len() {
-                self.subchunk_data[i].0 += shift;
-            }
+        } else if !vertices.is_empty() {
+            self.vertices.as_ref().unwrap().slice(0..vertices.len()).unwrap().write(vertices);
         }
-
-        self.subchunk_data[subchunk_index].1 = quad_count;
-        if quad_count > 0 {
-            self.vertices.slice(start * 4..(start + quad_count) * 4).unwrap().write(vertices);
-            self.indices.slice(start * 6..(start + quad_count) * 6).unwrap().write(indices);
-        }
+        self.len = vertices.len();
     }
 
+    #[profiling::function]
     fn draw<U>(&self, target: &mut glium::Frame, program: &glium::Program, uniforms: &U, params: &glium::DrawParameters)
         where U: glium::uniforms::Uniforms
     {
-        for (index, len) in &self.subchunk_data {
-            let index = *index;
-            let len = *len;
-            if len == 0 {
-                continue;
-            }
-            let vertices = self.vertices.slice(index*4..(index+len)*4).unwrap();
-            let indices = self.indices.slice(index*6..(index+len)*6).unwrap();
+        if let Some(vertices) = &self.vertices {
+            let vertices = vertices.slice(0..self.len).unwrap();
+            let index_buffer = SHARED_INDEX_BUFFER.borrow();
+            let indices = index_buffer.slice(0..self.len * 3 / 2).unwrap();
             target.draw(vertices, indices, program, uniforms, params).unwrap();
         }
     }
 }
 
+#[derive(Default)]
 struct BakedChunkGeometry {
     opaque_geometry: BakedGeometry,
     transparent_geometry: BakedGeometry,
     translucent_geometry: BakedGeometry,
-}
-
-impl BakedChunkGeometry {
-    fn new(display: &glium::Display, subchunk_count: usize) -> Self {
-        BakedChunkGeometry {
-            opaque_geometry: BakedGeometry::new(display, subchunk_count, 75 * 1024),
-            transparent_geometry: BakedGeometry::new(display, subchunk_count, 10 * 1024),
-            translucent_geometry: BakedGeometry::new(display, subchunk_count, 1024),
-        }
-    }
 }
 
 struct BuiltChunk {
@@ -172,6 +153,7 @@ struct BuiltChunk {
 }
 
 impl BuiltChunk {
+    #[profiling::function]
     fn new(subchunk_count: u32) -> Self {
         let mut subchunk_geometry = Vec::with_capacity(subchunk_count as usize);
         for _ in 0..subchunk_count {
@@ -179,7 +161,7 @@ impl BuiltChunk {
         }
         Self {
             subchunk_geometry: Mutex::new(subchunk_geometry),
-            baked_geometry: MainThreadStore::create(move || RefCell::new(BakedChunkGeometry::new(get_display(), subchunk_count as usize))),
+            baked_geometry: MainThreadStore::default(),
             ready: AtomicBool::new(false),
         }
     }
@@ -187,11 +169,12 @@ impl BuiltChunk {
 
 struct ChunkStore {
     render_distance: u32,
-    camera_pos: Mutex<Option<ChunkPos>>,
+    camera_pos: ProfileMutex<Option<ChunkPos>>,
     chunks: Vec<Mutex<BuiltChunk>>,
 }
 
 impl ChunkStore {
+    #[profiling::function]
     fn new(render_distance: u32, subchunk_count: u32) -> Self {
         let width = render_distance * 2 + 1;
         let mut chunks = Vec::with_capacity((width * width) as usize);
@@ -200,7 +183,7 @@ impl ChunkStore {
         }
         Self {
             render_distance,
-            camera_pos: Mutex::new(None),
+            camera_pos: profile_mutex!("camera_pos", None),
             chunks,
         }
     }
@@ -212,11 +195,13 @@ impl ChunkStore {
         z * width as usize + x
     }
 
+    #[profiling::function]
     fn get(&self, chunk_pos: ChunkPos) -> impl Deref<Target=BuiltChunk> + DerefMut<Target=BuiltChunk> + '_ {
         self.chunks[self.get_index(chunk_pos)].lock().unwrap()
     }
 
-    fn set_camera_pos(&self, camera_pos: ChunkPos) -> MutexGuard<Option<ChunkPos>> {
+    #[profiling::function]
+    fn set_camera_pos(&self, camera_pos: ChunkPos) -> ProfileMutexGuard<Option<ChunkPos>> {
         let mut current_camera_pos = self.camera_pos.lock().unwrap();
         if *current_camera_pos == Some(camera_pos) {
             return current_camera_pos;
@@ -283,70 +268,79 @@ impl WorldRenderer {
         }
     }
 
-    pub fn start_build_worker(world_ref: &WorldRef) {
-        world_ref.spawn_worker(|world, stop| {
-            while !stop() {
-                let dimension_id = world.camera.read().unwrap().dimension.clone();
-                let dimension = match world.get_dimension(&dimension_id) {
-                    Some(d) => d,
-                    None => {
-                        World::worker_yield();
-                        continue;
-                    }
-                };
-                let render_distance_chunks = 16;
+    #[profiling::function]
+    fn chunk_render_worker(world: Arc<World>, stop: &dyn Fn() -> bool) {
+        while !stop() {
+            let dimension_id = world.camera.read().unwrap().dimension.clone();
+            let dimension = match world.get_dimension(&dimension_id) {
+                Some(d) => d,
+                None => {
+                    World::worker_yield();
+                    continue;
+                }
+            };
+            let render_distance_chunks = 16;
 
-                for delta in ChunkPos::ZERO.square_range(render_distance_chunks as i32).iter() {
-                    let mut chunk_changed = false;
-                    let mut last_camera_pos = None;
-                    'subchunk_loop:
-                    for subchunk_y in dimension.min_y >> 4..=dimension.max_y >> 4 {
+            for delta in ChunkPos::ZERO.square_range(render_distance_chunks as i32).iter() {
+                let mut chunk_changed = false;
+                let mut last_camera_pos = None;
+                'subchunk_loop:
+                for subchunk_y in dimension.min_y >> 4..=dimension.max_y >> 4 {
+                    if stop() {
+                        return;
+                    }
+                    loop {
+                        profiling::scope!("build_worker lock loop");
+                        if let Some(chunk_store) = world.renderer.chunk_store.get(&dimension_id) {
+                            let camera_pos_guard = chunk_store.camera_pos.lock().unwrap();
+                            if let Some(camera_pos) = *camera_pos_guard {
+                                if WorldRenderer::build_subchunk_geometry(
+                                    &world,
+                                    &dimension,
+                                    subchunk_y,
+                                    delta,
+                                    camera_pos,
+                                    &mut last_camera_pos,
+                                    &chunk_store,
+                                    &mut chunk_changed,
+                                    stop,
+                                ) {
+                                    continue 'subchunk_loop;
+                                } else {
+                                    break 'subchunk_loop;
+                                }
+                            }
+                        }
                         if stop() {
                             return;
                         }
-                        loop {
-                            if let Some(chunk_store) = world.renderer.chunk_store.get(&dimension_id) {
-                                let camera_pos_guard = chunk_store.camera_pos.lock().unwrap();
-                                if let Some(camera_pos) = *camera_pos_guard {
-                                    if WorldRenderer::build_subchunk_geometry(
-                                        &world,
-                                        &dimension,
-                                        subchunk_y,
-                                        delta,
-                                        camera_pos,
-                                        &mut last_camera_pos,
-                                        &chunk_store,
-                                        &mut chunk_changed,
-                                        stop,
-                                    ) {
-                                        continue 'subchunk_loop;
-                                    } else {
-                                        break 'subchunk_loop;
-                                    }
-                                }
-                            }
-                            if stop() {
-                                return;
-                            }
-                            World::worker_yield();
-                        }
+                        World::worker_yield();
                     }
+                }
 
-                    if chunk_changed {
-                        if let Some(camera_pos) = last_camera_pos {
-                            let chunk_pos = camera_pos + delta;
-                            let dimension_id = dimension_id.clone();
-                            let world = world.clone();
-                            crate::add_non_urgent_queued_task(move || {
-                                WorldRenderer::upload_chunk_geometry(&*world, dimension_id, chunk_pos, render_distance_chunks);
-                            });
-                        }
+                if chunk_changed {
+                    if let Some(camera_pos) = last_camera_pos {
+                        let chunk_pos = camera_pos + delta;
+                        let dimension_id = dimension_id.clone();
+                        let world = world.clone();
+                        crate::add_non_urgent_queued_task(move || {
+                            WorldRenderer::upload_chunk_geometry(&*world, dimension_id, chunk_pos, render_distance_chunks);
+                        });
                     }
                 }
             }
-        });
+            if stop() {
+                return;
+            }
+            World::worker_yield();
+        }
     }
 
+    pub fn start_build_worker(world_ref: &WorldRef) {
+        world_ref.spawn_worker(Self::chunk_render_worker);
+    }
+
+    #[profiling::function]
     #[allow(clippy::too_many_arguments)] // TODO: simplify this
     fn build_subchunk_geometry(
         world: &Arc<World>,
@@ -395,42 +389,37 @@ impl WorldRenderer {
         return true;
     }
 
+    #[profiling::function]
     fn upload_chunk_geometry(world: &World, dimension: FName, chunk_pos: ChunkPos, render_distance: i32) -> Option<()> {
         let chunk_store = world.renderer.chunk_store.get(&dimension)?;
-        let camera_pos_guard = chunk_store.camera_pos.lock().unwrap();
+        let camera_pos_guard = {
+            profiling::scope!("wait_camera_pos_guard");
+            chunk_store.camera_pos.lock().unwrap()
+        };
         let camera_pos = (*camera_pos_guard)?;
         if camera_pos.rectangular_distance(chunk_pos) > render_distance {
             // camera has moved away since this chunk was built
             return None;
         }
         let built_chunk = chunk_store.get(chunk_pos);
+        let subchunk_geometry = built_chunk.subchunk_geometry.lock().unwrap();
         let mut baked_geometry = built_chunk.baked_geometry.borrow_mut();
-        for (subchunk_index, subchunk_geometry) in built_chunk.subchunk_geometry.lock().unwrap().iter_mut().enumerate() {
-            if subchunk_geometry.mark_for_upload {
-                let process = |geom: &Geometry, baked: &mut BakedGeometry| {
-                    let vertices: Vec<_> = geom.quads.iter().flatten().cloned().collect();
-                    let indices: Vec<_> = (0..geom.quads.len()).flat_map(|i| {
-                        let start = i * 4;
-                        [start, start + 1, start + 2, start + 2, start + 3, start]
-                    }).map(|i| i as u32).collect();
-                    baked.modify(subchunk_index, &vertices, &indices);
-                };
-                process(&subchunk_geometry.opaque_geometry, &mut baked_geometry.opaque_geometry);
-                process(&subchunk_geometry.transparent_geometry, &mut baked_geometry.transparent_geometry);
-                process(&subchunk_geometry.translucent_geometry, &mut baked_geometry.translucent_geometry);
-                subchunk_geometry.mark_for_upload = false;
-            }
-        }
+        baked_geometry.opaque_geometry.set_buffer_data(&Geometry::join_vertices(subchunk_geometry.iter().map(|geom| &geom.opaque_geometry)));
+        baked_geometry.transparent_geometry.set_buffer_data(&Geometry::join_vertices(subchunk_geometry.iter().map(|geom| &geom.transparent_geometry)));
+        // TODO: sort translucent geometry
+        baked_geometry.translucent_geometry.set_buffer_data(&Geometry::join_vertices(subchunk_geometry.iter().map(|geom| &geom.translucent_geometry)));
 
         built_chunk.ready.store(true, Ordering::Release);
 
         return None;
     }
 
+    #[profiling::function]
     pub fn has_changed(&self) -> bool {
         true
     }
 
+    #[profiling::function]
     pub fn render_world(&self, world: &World, target: &mut glium::Frame) {
         let (dimension, camera_pos, yaw, pitch) = {
             let camera = world.camera.read().unwrap();
@@ -524,7 +513,6 @@ impl WorldRenderer {
         alpha_params.blend = glium::Blend::alpha_blending();
 
         for (pos, chunk) in &chunks_to_render {
-            // TODO: sort
             (*chunk.baked_geometry).borrow().translucent_geometry.draw(
                 target, &*self.shader_program, &uniforms(*pos), &alpha_params
             );

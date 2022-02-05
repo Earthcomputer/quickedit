@@ -9,6 +9,7 @@ build = "build.rs"
 # See more keys and their definitions at https://doc.rust-lang.org/cargo/reference/manifest.html
 
 [dependencies]
+profiling = "1.0.5"
 glium = "0.28.0"
 winit = "0.23.0"
 conrod_core = "0.76.0"
@@ -42,6 +43,14 @@ rayon = "1.5.1"
 glam = "0.20.2"
 approx = "0.5.1"
 num_cpus = "1.13.1"
+tracy-client = { version = "0.12.6", optional = true }
+tracy-client-sys = { version = "0.16.0", optional = true }
+
+[patch.crates-io]
+tracy-client-sys = { git = "https://github.com/Earthcomputer/rust_tracy_client" }
+
+[features]
+profile-with-tracy = ["tracy-client", "tracy-client-sys", "profiling/profile-with-tracy"]
 
 [build-dependencies]
 winres = "0.1.12"

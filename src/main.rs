@@ -5,9 +5,15 @@
 #![feature(explicit_generic_args_with_impl_trait)]
 #![feature(int_log)]
 #![feature(int_roundings)]
+#![feature(once_cell)]
 #![feature(option_result_contains)]
 #![feature(read_buf)]
 #![feature(try_find)]
+
+// These two lines are just to trick intellij-rust into highlighting functions with profiling::function.
+// https://github.com/intellij-rust/intellij-rust/issues/8504#issuecomment-1028447198
+#![feature(register_tool)]
+#![register_tool(profiling)]
 
 #![allow(dead_code)]
 #![allow(clippy::needless_return)]
@@ -21,6 +27,7 @@ mod renderer;
 mod resources;
 mod geom;
 mod blocks;
+mod debug;
 
 extern crate conrod_core;
 extern crate conrod_glium;
@@ -63,6 +70,11 @@ const FONT_DATA: &[u8] = include_bytes!("../res/MinecraftRegular-Bmg3.ttf");
 const ICON_DATA: &[u8] = include_bytes!("../res/icon_32x32.png");
 
 const MSPT: u64 = 1000 / 60;
+
+#[cfg(feature = "profile-with-tracy")]
+#[global_allocator]
+static GLOBAL: tracy_client::ProfiledAllocator<std::alloc::System> =
+    tracy_client::ProfiledAllocator::new(std::alloc::System, 100);
 
 thread_local! {
     static ICON: Icon = {
@@ -134,6 +146,7 @@ where
                 if needs_redraw {
                     display.gl_window().window().request_redraw();
                 }
+                profiling::finish_frame!();
             }
             _ => {}
         }
@@ -152,6 +165,8 @@ where
 conrod_winit::v023_conversion_fns!();
 
 fn main() {
+    profiling::register_thread!("main");
+
     let args: CmdLineArgs = CmdLineArgs::from_args();
 
     let event_loop = event_loop::EventLoop::new();
@@ -224,9 +239,16 @@ fn main() {
                 should_exit,
             } => {
                 if let Some(event) = convert_event(event, display.gl_window().window()) {
-                    my_ui.handle_event(event);
+                    {
+                        profiling::scope!("conrod_ui::handle_event");
+                        my_ui.handle_event(event);
+                    }
                     for event in my_ui.global_input().events() {
-                        ui::handle_event(&mut *ui_state.borrow_mut(), &my_ui, event);
+                        let mut state = {
+                            profiling::scope!("ui_state.borrow_mut");
+                            ui_state.borrow_mut()
+                        };
+                        ui::handle_event(&mut *state, &my_ui, event);
                     }
                     *should_update_ui = true;
                 }
@@ -238,6 +260,7 @@ fn main() {
             Request::SetUi { needs_redraw } => {
                 let start_time = time::Instant::now();
                 {
+                    profiling::scope!("queued_tasks");
                     let mut queued_tasks = QUEUED_TASKS.lock().unwrap();
                     for task in queued_tasks.drain(..) {
                         task();
@@ -252,6 +275,7 @@ fn main() {
                     worlds.iter().any(|world| world.renderer.has_changed())
                 };
                 {
+                    profiling::scope!("non_urgent_queued_tasks");
                     let mut non_urgent_queued_tasks = NON_URGENT_QUEUED_TASKS.lock().unwrap();
                     while !non_urgent_queued_tasks.is_empty() && time::Instant::now() - start_time < time::Duration::from_millis(MSPT) {
                         let task = non_urgent_queued_tasks.pop_front().unwrap();
@@ -260,8 +284,11 @@ fn main() {
                 }
             },
             Request::Redraw => {
-                let primitives = my_ui.draw();
-                renderer.fill(display, primitives, &image_map);
+                {
+                    profiling::scope!("setup_ui_primitives");
+                    let primitives = my_ui.draw();
+                    renderer.fill(display, primitives, &image_map);
+                };
                 let mut target = display.draw();
                 target.clear_color_and_depth((0.0, 0.0, 0.0, 1.0), 1.0);
 
@@ -272,8 +299,14 @@ fn main() {
                     }
                 }
 
-                renderer.draw(display, &mut target, &image_map).unwrap();
-                target.finish().unwrap();
+                {
+                    profiling::scope!("render_ui");
+                    renderer.draw(display, &mut target, &image_map).unwrap();
+                }
+                {
+                    profiling::scope!("finish_drawing");
+                    target.finish().unwrap();
+                }
             }
         }
         unsafe {

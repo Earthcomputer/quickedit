@@ -1,7 +1,10 @@
 use conrod_core::{Colorable, event, input, Labelable, Positionable, Sizeable, widget, Widget, widget_ids};
 use glam::{DMat2, DVec2};
+use lazy_static::lazy_static;
 use winit::dpi;
+use std::cell::RefCell;
 use crate::{minecraft, world, renderer};
+use crate::util::MainThreadStore;
 
 widget_ids!(pub struct Ids {
     debug,
@@ -34,6 +37,7 @@ pub fn init_ui(ui: &mut conrod_core::Ui) -> UiState {
     return UiState { ids: Ids::new(ui.widget_id_generator()), key_states: KeyStates::default() };
 }
 
+#[profiling::function]
 pub fn set_ui(state: &UiState, ui: &mut conrod_core::UiCell) {
     let (x, y, z, yaw, pitch) = {
         let worlds = world::WORLDS.read().unwrap();
@@ -78,12 +82,29 @@ fn open_clicked() {
     }
 }
 
+lazy_static! {
+    static ref WINDOW_SIZE: MainThreadStore<RefCell<Option<(u32, u32)>>> = MainThreadStore::new(RefCell::new(None));
+}
+
+#[profiling::function]
 pub fn handle_event(ui_state: &mut UiState, ui: &conrod_core::Ui, event: &event::Event) {
+    #[profiling::function]
     fn move_cursor_to_middle() -> Result<(), winit::error::ExternalError> {
-        let gl_window = renderer::get_display().gl_window();
+        let gl_window = {
+            profiling::scope!("get_window");
+            renderer::get_display().gl_window()
+        };
         let window = gl_window.window();
-        let window_size = window.inner_size();
-        window.set_cursor_position(dpi::PhysicalPosition::new(window_size.width as f32 * 0.5, window_size.height as f32 * 0.5))
+        let window_size = {
+            profiling::scope!("get_window_size");
+            WINDOW_SIZE.borrow_mut().get_or_insert_with(|| {
+                println!("Getting window size");
+                let size = window.inner_size();
+                (size.width, size.height)
+            }).clone()
+        };
+        profiling::scope!("move_cursor_to_middle");
+        window.set_cursor_position(dpi::PhysicalPosition::new(window_size.0 as f32 * 0.5, window_size.1 as f32 * 0.5))
     }
 
     match event {
@@ -152,10 +173,15 @@ pub fn handle_event(ui_state: &mut UiState, ui: &conrod_core::Ui, event: &event:
                 renderer::get_display().gl_window().window().set_cursor_visible(true);
             }
         }
+        event::Event::Raw(event::Input::Resize(w, h)) => {
+            println!("Resizing window: {}, {}", w, h);
+            *WINDOW_SIZE.borrow_mut() = None;
+        }
         _ => {}
     }
 }
 
+#[profiling::function]
 pub fn tick(ui_state: &mut UiState) {
     let mut x = 0.0;
     let mut y = 0.0;
