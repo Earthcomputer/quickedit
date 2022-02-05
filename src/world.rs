@@ -299,9 +299,7 @@ impl Dimension {
 
     #[profiling::function]
     pub fn get_chunk(&self, pos: ChunkPos) -> Option<Arc<Chunk>> {
-        self.chunks.view(&pos, |_, chunk| {
-            chunk.clone()
-        })
+        self.chunks.get(&pos).map(|chunk| chunk.clone())
     }
 
     #[profiling::function]
@@ -607,7 +605,7 @@ impl World {
 
     #[profiling::function]
     pub fn get_dimension(&self, id: &FName) -> Option<Arc<Dimension>> {
-        self.dimensions.view(id, |_, dim| dim.clone())
+        self.dimensions.get(id).map(|d| d.clone())
     }
 
     #[profiling::function]

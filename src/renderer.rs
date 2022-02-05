@@ -581,49 +581,55 @@ impl WorldRenderer {
 
     fn render_state(world: &World, dimension: &Dimension, state: &IBlockState, pos: BlockPos, world_pos: BlockPos, out_geometry: &mut SubchunkGeometry) {
         let color = blocks::get_block_color(world, dimension, world_pos, state);
-        let baked_model = WorldRenderer::get_baked_model(world, state);
-        for (dir, face) in &baked_model.faces {
-            if let Some(dir) = dir {
-                if let Some(neighbor) = dimension.get_block_state(world_pos + dir.forward()) {
-                    let neighbor_model = WorldRenderer::get_baked_model(world, &neighbor);
-                    if let Some(neighbor_face) = neighbor_model.faces.get(&Some(dir.opposite())) {
-                        if (face.cull_mask[0] & !neighbor_face.cull_mask[0]) == IVec4::ZERO && (face.cull_mask[1] & !neighbor_face.cull_mask[1]) == IVec4::ZERO {
+        WorldRenderer::with_baked_model(world, state, |baked_model| {
+            for (dir, face) in &baked_model.faces {
+                if let Some(dir) = dir {
+                    if let Some(neighbor) = dimension.get_block_state(world_pos + dir.forward()) {
+                        let mut culling = false;
+                        WorldRenderer::with_baked_model(world, &neighbor, |neighbor_model| {
+                            if let Some(neighbor_face) = neighbor_model.faces.get(&Some(dir.opposite())) {
+                                if (face.cull_mask[0] & !neighbor_face.cull_mask[0]) == IVec4::ZERO && (face.cull_mask[1] & !neighbor_face.cull_mask[1]) == IVec4::ZERO {
+                                    culling = true;
+                                }
+                            }
+                        });
+                        if culling {
                             continue;
                         }
                     }
                 }
-            }
-            let geom = match face.transparency {
-                Transparency::Opaque => &mut out_geometry.opaque_geometry,
-                Transparency::Transparent => &mut out_geometry.transparent_geometry,
-                Transparency::Translucent => &mut out_geometry.translucent_geometry,
-            };
-            for quad in &face.quads {
-                let convert_vertex = |vertex: &BakedModelVertex| {
-                    util::Vertex {
-                        position: [
-                            vertex.position[0] + pos.x as f32,
-                            vertex.position[1] + pos.y as f32,
-                            vertex.position[2] + pos.z as f32,
-                        ],
-                        tex_coords: vertex.tex_coords,
-                        lightmap_coords: [1.0, 0.0],
-                        color: if vertex.tint { (color.as_vec3() / 255.0).to_array() } else { [1.0, 1.0, 1.0] },
-                    }
+                let geom = match face.transparency {
+                    Transparency::Opaque => &mut out_geometry.opaque_geometry,
+                    Transparency::Transparent => &mut out_geometry.transparent_geometry,
+                    Transparency::Translucent => &mut out_geometry.translucent_geometry,
                 };
-                geom.quads.push([convert_vertex(&quad[0]), convert_vertex(&quad[1]), convert_vertex(&quad[2]), convert_vertex(&quad[3])]);
+                for quad in &face.quads {
+                    let convert_vertex = |vertex: &BakedModelVertex| {
+                        util::Vertex {
+                            position: [
+                                vertex.position[0] + pos.x as f32,
+                                vertex.position[1] + pos.y as f32,
+                                vertex.position[2] + pos.z as f32,
+                            ],
+                            tex_coords: vertex.tex_coords,
+                            lightmap_coords: [1.0, 0.0],
+                            color: if vertex.tint { (color.as_vec3() / 255.0).to_array() } else { [1.0, 1.0, 1.0] },
+                        }
+                    };
+                    geom.quads.push([convert_vertex(&quad[0]), convert_vertex(&quad[1]), convert_vertex(&quad[2]), convert_vertex(&quad[3])]);
+                }
             }
-        }
+        });
     }
 
-    fn get_baked_model<'a>(world: &'a World, state: &IBlockState) -> &'a BakedModel {
+    fn with_baked_model(world: &World, state: &IBlockState, mut f: impl FnMut(&BakedModel)) {
         match world.resources.baked_model_cache.get(state) {
-            Some(model) => model.value(),
+            Some(model) => f(&*model.value()),
             None => {
                 world.resources.baked_model_cache.insert(state.clone(), WorldRenderer::bake_model(world, state));
-                world.resources.baked_model_cache.get(state).unwrap().value()
+                f(&*world.resources.baked_model_cache.get(state).unwrap().value());
             }
-        }
+        };
     }
 
     fn bake_model(world: &World, state: &IBlockState) -> BakedModel {

@@ -97,11 +97,11 @@ pub fn handle_event(ui_state: &mut UiState, ui: &conrod_core::Ui, event: &event:
         let window = gl_window.window();
         let window_size = {
             profiling::scope!("get_window_size");
-            WINDOW_SIZE.borrow_mut().get_or_insert_with(|| {
+            *WINDOW_SIZE.borrow_mut().get_or_insert_with(|| {
                 println!("Getting window size");
                 let size = window.inner_size();
                 (size.width, size.height)
-            }).clone()
+            })
         };
         profiling::scope!("move_cursor_to_middle");
         window.set_cursor_position(dpi::PhysicalPosition::new(window_size.0 as f32 * 0.5, window_size.1 as f32 * 0.5))
