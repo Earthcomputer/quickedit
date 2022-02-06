@@ -14,6 +14,7 @@ use ahash::AHashMap;
 use serde::{Deserialize, Serialize};
 use byteorder::{BigEndian, ReadBytesExt};
 use dashmap::mapref::entry::Entry;
+use dashmap::try_result::TryResult;
 use glam::{IVec2, Vec3Swizzles};
 use internment::ArcIntern;
 use lazy_static::lazy_static;
@@ -23,7 +24,7 @@ use crate::fname::{CommonFNames, FName};
 use crate::minecraft;
 use crate::geom::{BlockPos, ChunkPos, IVec2Extensions, IVec2RangeExtensions};
 use crate::resources;
-use crate::util::{FastDashMap, make_fast_dash_map};
+use crate::util::{FastDashMap, FastDashRefMut, make_fast_dash_map};
 use crate::renderer::WorldRenderer;
 
 lazy_static! {
@@ -328,39 +329,64 @@ impl Dimension {
     }
 
     #[profiling::function]
+    pub fn try_does_chunk_exist(&self, world: &World, pos: ChunkPos) -> Option<bool> {
+        self.does_chunk_exist_internal(world, pos, false)
+    }
+
+    #[profiling::function]
     pub fn does_chunk_exist(&self, world: &World, pos: ChunkPos) -> bool {
-        if let Some(exists) = self.chunk_existence_cache.get(&pos) {
-            return *exists;
+        self.does_chunk_exist_internal(world, pos, true).unwrap()
+    }
+
+    fn does_chunk_exist_internal(&self, world: &World, pos: ChunkPos, now: bool) -> Option<bool> {
+        if now {
+            if let Some(exists) = self.chunk_existence_cache.get(&pos) {
+                return Some(*exists);
+            }
+        } else {
+            match self.chunk_existence_cache.try_get(&pos) {
+                TryResult::Present(exists) => return Some(*exists),
+                TryResult::Absent => {},
+                TryResult::Locked => return None,
+            };
         }
 
-        *self.chunk_existence_cache.entry(pos).or_insert_with(|| {
+        self.chunk_existence_cache.entry(pos).or_try_insert_with::<()>(|| {
             if self.chunks.contains_key(&pos) {
-                return true;
+                return Ok(true);
             }
-            let region_file = match self.get_region_file(world, pos >> 5i8) {
-                Ok(file) => file,
+            let region_file = match self.get_region_file(world, pos >> 5i8, now) {
+                Ok(file) => file.ok_or(())?,
                 Err(e) => {
                     if e.kind() != ErrorKind::NotFound {
                         eprintln!("Failed to get region file: {}", e);
                     }
-                    return false;
+                    return Ok(false);
                 }
             };
             match region_file.0.read_u32_at::<byteorder::NativeEndian>((((pos.x & 31) | ((pos.y & 31) << 5)) << 2) as u64) {
-                Ok(0) => false,
-                Ok(_) => true,
+                Ok(0) => Ok(false),
+                Ok(_) => Ok(true),
                 Err(e) => {
                     eprintln!("Error checking existence of chunk: {}", e);
-                    false
+                    Ok(false)
                 }
             }
-        })
+        }).ok().map(|b| *b)
     }
 
     #[profiling::function]
-    fn get_region_file(&self, world: &World, region_pos: IVec2) -> io::Result<dashmap::mapref::one::RefMut<IVec2, (RandomAccessFile, time::SystemTime), ahash::RandomState>> {
-        if let Entry::Occupied(entry) = self.region_file_cache.entry(region_pos) {
-            return Ok(entry.into_ref());
+    fn get_region_file(&self, world: &World, region_pos: IVec2, now: bool) -> io::Result<Option<FastDashRefMut<IVec2, (RandomAccessFile, time::SystemTime)>>> {
+        if now {
+            if let Entry::Occupied(entry) = self.region_file_cache.entry(region_pos) {
+                return Ok(Some(entry.into_ref()));
+            }
+        } else {
+            match self.region_file_cache.try_entry(region_pos) {
+                Some(Entry::Occupied(entry)) => return Ok(Some(entry.into_ref())),
+                Some(_) => {},
+                None => return Ok(None),
+            };
         }
 
         let first_accessed_pos = self.region_file_cache.iter().min_by_key(|r| r.value().1).map(|r| *r.key());
@@ -375,14 +401,14 @@ impl Dimension {
             let raf = RandomAccessFile::open(region_path)?;
             Ok((raf, time::SystemTime::now()))
         })?;
-        Ok(region_file_cache_entry)
+        Ok(Some(region_file_cache_entry))
     }
 
     #[profiling::function]
     fn read_chunk(&self, world: &World, pos: ChunkPos) -> io::Result<Option<Chunk>> {
         let serialized_chunk: SerializedChunk = {
-            let region_file_cache_entry = match self.get_region_file(world, pos >> 5i8) {
-                Ok(entry) => entry,
+            let region_file_cache_entry = match self.get_region_file(world, pos >> 5i8, true) {
+                Ok(entry) => entry.unwrap(),
                 Err(e) => {
                     return if e.kind() == ErrorKind::NotFound {
                         Ok(None)

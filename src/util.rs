@@ -8,6 +8,7 @@ use std::str::FromStr;
 use std::sync::atomic::{AtomicUsize, Ordering};
 use ahash::AHashMap;
 use dashmap::DashMap;
+use dashmap::mapref::one::{Ref, RefMut};
 use delegate::delegate;
 use glium::implement_vertex;
 use lazy_static::lazy_static;
@@ -93,6 +94,8 @@ impl fmt::Display for ResourceLocation {
 }
 
 pub type FastDashMap<K, V> = DashMap<K, V, ahash::RandomState>;
+pub type FastDashRef<'a, K, V> = Ref<'a, K, V, ahash::RandomState>;
+pub type FastDashRefMut<'a, K, V> = RefMut<'a, K, V, ahash::RandomState>;
 pub fn make_fast_dash_map<K, V>() -> FastDashMap<K, V>
 where
     K: Eq + Hash + Clone,

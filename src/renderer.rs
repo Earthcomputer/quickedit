@@ -525,7 +525,7 @@ impl WorldRenderer {
         let mut existing_chunks_vertices = Vec::new();
         let mut existing_chunks_indices = Vec::new();
         for chunk_pos in current_chunk.square_range(UNLOADED_RENDER_DISTANCE).iter() {
-            if dimension.does_chunk_exist(world, chunk_pos) {
+            if dimension.try_does_chunk_exist(world, chunk_pos) == Some(true) {
                 let color = if ((chunk_pos.x ^ chunk_pos.y) & 1) == 0 { EXISTING_CHUNK_COLOR_A } else { EXISTING_CHUNK_COLOR_B };
                 let world_pos = |chunk_pos: ChunkPos| {
                     let chunk_pos = chunk_pos - current_chunk;
