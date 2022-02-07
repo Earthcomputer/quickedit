@@ -439,11 +439,11 @@ impl WorldRenderer {
 
         let dimension = &*dimension_arc;
 
-        let fov = 70.0f32;
+        let fov = 70.0f32.to_radians();
         let aspect_ratio = target.get_dimensions().0 as f32 / target.get_dimensions().1 as f32;
         let znear = 0.05f32;
         let zfar = render_distance_chunks as f32 * 64.0;
-        let projection = Mat4::perspective_rh(fov.to_radians(), aspect_ratio, znear, zfar);
+        let projection = Mat4::perspective_rh(fov, aspect_ratio, znear, zfar);
         let camera_yaw = yaw.to_radians();
         let camera_pitch = pitch.to_radians();
         let view_matrix = Mat4::from_rotation_x(-camera_pitch) * Mat4::from_rotation_y(-camera_yaw);
@@ -463,29 +463,12 @@ impl WorldRenderer {
             }
         };
 
-        fn get_forward_vector(yaw: f32) -> glam::DVec2 {
-            let yaw = yaw.to_radians();
-            glam::DVec2::new(-yaw.sin() as f64, -yaw.cos() as f64)
-        }
-        let left_normal = get_forward_vector(yaw - 90.0f32 + fov);
-        let right_normal = get_forward_vector(yaw + 90.0f32 - fov);
-        let min_left_dot = left_normal.dot(camera_pos.xz());
-        let min_right_dot = right_normal.dot(camera_pos.xz());
-
         self.render_existing_chunks(world, &*dimension, target, &uniforms(current_chunk), current_chunk);
 
         let mut chunks_to_render = Vec::new();
 
         for chunk_pos in current_chunk.square_range(render_distance_chunks as i32).iter() {
-            let mut is_in_view = false;
-            for delta in (IVec2::ZERO..=IVec2::ONE).iter() {
-                let corner_pos = ((chunk_pos + delta) << 4i8).as_dvec2();
-                if left_normal.dot(corner_pos) >= min_left_dot && right_normal.dot(corner_pos) >= min_right_dot {
-                    is_in_view = true;
-                    break;
-                }
-            }
-            if is_in_view {
+            if Self::frustum_check(dimension, chunk_pos, camera_pos, camera_yaw, camera_pitch, fov) {
                 let built_chunk = chunk_store.get(chunk_pos);
                 if built_chunk.ready.load(Ordering::Acquire) {
                     chunks_to_render.push((chunk_pos, built_chunk));
@@ -516,6 +499,85 @@ impl WorldRenderer {
                 target, &*self.shader_program, &uniforms(*pos), &alpha_params
             );
         }
+    }
+
+    fn frustum_check(dimension: &Dimension, chunk_pos: ChunkPos, camera_pos: DVec3, yaw_radians: f32, pitch_radians: f32, fov_radians: f32) -> bool {
+        fn get_forward_vector(yaw: f32, pitch: f32) -> glam::DVec3 {
+            let x = -(pitch.cos() * yaw.sin());
+            let y = pitch.sin();
+            let z = -(pitch.cos() * yaw.cos());
+            glam::DVec3::new(x as f64, y as f64, z as f64)
+        }
+
+        let left_forward = get_forward_vector(yaw_radians - fov_radians, pitch_radians);
+        let right_forward = get_forward_vector(yaw_radians + fov_radians, pitch_radians);
+        let up_forward = get_forward_vector(yaw_radians, pitch_radians + fov_radians);
+        let down_forward = get_forward_vector(yaw_radians, pitch_radians - fov_radians);
+        let left_normal = get_forward_vector(yaw_radians - f32::FRAC_PI_2() - fov_radians, pitch_radians);
+        let right_normal = get_forward_vector(yaw_radians + f32::FRAC_PI_2() + fov_radians, pitch_radians);
+        let up_normal = get_forward_vector(yaw_radians, pitch_radians + f32::FRAC_PI_2() + fov_radians);
+        let down_normal = get_forward_vector(yaw_radians, pitch_radians - f32::FRAC_PI_2() - fov_radians);
+        let forwards = [left_forward, right_forward, up_forward, down_forward];
+        let normals = [left_normal, right_normal, up_normal, down_normal];
+
+        let chunk_corners: Vec<_> = (IVec3::ZERO..=IVec3::ONE).iter().map(|delta| {
+            (IVec3::new(chunk_pos.x << 4, dimension.min_y, chunk_pos.y << 4) + delta * IVec3::new(16, dimension.max_y - dimension.min_y + 1, 16)).as_dvec3()
+        }).collect();
+
+        let is_separating_axis = |axis: DVec3| {
+            // handle frustum points at infinity
+            let mut had_pos_inf = false;
+            let mut had_neg_inf = false;
+            for forward in &forwards {
+                let dot = forward.dot(axis);
+                if dot.abs_diff_eq(&0.0, 0.0001) {
+                    // zero means it has the same dot product as the camera point, which is handled below
+                } else if dot > 0.0 {
+                    had_pos_inf = true;
+                } else {
+                    had_neg_inf = true;
+                }
+            }
+            if had_pos_inf && had_neg_inf {
+                // impossible that chunk cannot lie between positive and negative infinity
+                return false;
+            }
+
+            // handle the finite point at the camera
+            let camera_dot = camera_pos.dot(axis);
+            let expected_less = chunk_corners[0].dot(axis) < camera_dot;
+            if expected_less && had_neg_inf || !expected_less && had_pos_inf {
+                return false;
+            }
+
+            for corner in chunk_corners.iter().skip(1) {
+                if (corner.dot(axis) < camera_dot) != expected_less {
+                    return false;
+                }
+            }
+
+            true
+        };
+
+        for normal in &normals {
+            if is_separating_axis(*normal) {
+                return false;
+            }
+        }
+        if is_separating_axis(DVec3::X) || is_separating_axis(DVec3::Y) || is_separating_axis(DVec3::Z) {
+            return false;
+        }
+
+        for forward in &forwards {
+            for chunk_axis in [DVec3::X, DVec3::Y, DVec3::Z] {
+                let cross_product = forward.cross(chunk_axis);
+                if cross_product.length_squared() > 0.0001 && is_separating_axis(cross_product) {
+                    return false;
+                }
+            }
+        }
+
+        true
     }
 
     fn render_existing_chunks<U>(&self, world: &World, dimension: &Dimension, target: &mut Frame, uniforms: &U, current_chunk: IVec2)
