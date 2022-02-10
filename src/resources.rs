@@ -292,11 +292,11 @@ impl Resources {
         for namespace in resource_pack.get_sub_files("assets/", "/") {
             for block_name in resource_pack.get_sub_files(&format!("assets/{}/blockstates/", &namespace), ".json") {
                 let blockstate_path = format!("assets/{}/blockstates/{}.json", namespace, block_name);
-                let mut blockstate_reader = match resource_pack.get_reader(&blockstate_path) {
+                let blockstate_reader = match resource_pack.get_reader(&blockstate_path) {
                     Ok(Some(reader)) => reader,
                     _ => continue
                 };
-                let blockstate: BlockstateFile = match serde_json::from_reader(util::ReadDelegate::new(&mut *blockstate_reader)) {
+                let blockstate: BlockstateFile = match serde_json::from_reader(blockstate_reader) {
                     Ok(blockstate) => blockstate,
                     Err(e) => {
                         eprintln!("Error parsing blockstate {}: {}", block_name, e);
@@ -343,7 +343,7 @@ impl Resources {
             let model_id = models_to_load.iter().next().unwrap().clone();
             models_to_load.remove(&model_id);
 
-            let mut model_reader = match Resources::get_resource(resource_packs, format!("assets/{}/models/{}.json", model_id.namespace, model_id.name).as_str()) {
+            let model_reader = match Resources::get_resource(resource_packs, format!("assets/{}/models/{}.json", model_id.namespace, model_id.name).as_str()) {
                 Ok(Some(reader)) => reader,
                 _ => {
                     eprintln!("Error loading model {}", model_id);
@@ -351,7 +351,7 @@ impl Resources {
                     continue
                 }
             };
-            let mut model: PartialBlockModel = match serde_json::from_reader(util::ReadDelegate::new(&mut *model_reader)) {
+            let mut model: PartialBlockModel = match serde_json::from_reader(model_reader) {
                 Ok(model) => model,
                 Err(e) => {
                     eprintln!("Error parsing model {}: {}", model_id, e);
@@ -499,8 +499,8 @@ impl Resources {
                     }
                 }.to_rgba8();
                 let animation: Option<Animation> = match Resources::get_resource(resource_packs, format!("assets/{}/textures/{}.png.mcmeta", texture.namespace, texture.name).as_str()) {
-                    Ok(Some(mut reader)) => {
-                        match serde_json::from_reader(util::ReadDelegate::new(&mut *reader)) {
+                    Ok(Some(reader)) => {
+                        match serde_json::from_reader(reader) {
                             Ok(animation) => Some(animation),
                             Err(err) => {
                                 eprintln!("Error loading texture animation: {}", err);

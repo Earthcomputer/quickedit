@@ -9,41 +9,40 @@ build = "build.rs"
 # See more keys and their definitions at https://doc.rust-lang.org/cargo/reference/manifest.html
 
 [dependencies]
-profiling = "1.0.5"
-glium = "0.31.0"
-winit = "0.26.1"
-egui = { version = "0.16.1", default_features = false, features = ["single_threaded"]}
-egui_glium = { version = "0.16.0", default_features = false, features = ["clipboard", "links"] }
-native-dialog = "0.6.1"
-num-integer = "0.1.44"
-num-traits = "0.2.14"
-internment = { version = "0.5.5", features = ["arc", "serde"] }
-dashmap = "5.1.0"
-hematite-nbt = { git = "https://github.com/PistonDevelopers/hematite_nbt", rev = "ce60b81" }
-positioned-io-preview = "0.3.3"
-byteorder = "1.4.3"
-lazy_static = "1.4.0"
-ahash = { version = "0.7.6", features = ["serde"] }
-image = { version = "0.23.14", default_features = false, features = ["png"] }
-home = "0.5.3"
-serde = { version = "1.0.133", features = ["derive"] }
-serde_json = "1.0.74"
-serde_with = "1.11.0"
-sha-1 = "0.10.0"
-chrono = { version = "0.4.19", features = ["serde"] }
-zip = "0.5.13"
-path-slash = "0.1.4"
-delegate = "0.6.1"
-futures-lite = "1.12.0"
-async-executor = "1.4.1"
-attohttpc = "0.18.0"
-structopt = "0.3.25"
-rayon = "1.5.1"
-glam = "0.20.2"
-approx = "0.5.1"
-num_cpus = "1.13.1"
-tracy-client = { version = "0.12.6", optional = true }
-tracy-client-sys = { version = "0.16.0", optional = true }
+ahash = { version = "0.7.6", features = ["serde"] } # for faster hash maps
+approx = "0.5.1" # for approximate float comparisons
+async-executor = "1.4.1" # simple async executor
+attohttpc = "0.18.0" # simple HTTP client
+byteorder = "1.4.3" # for reading and writing integers
+chrono = { version = "0.4.19", features = ["serde"] } # for time handling
+dashmap = "5.1.0" # for concurrent hash maps
+egui = { version = "0.16.1", default_features = false, features = ["single_threaded"] } # for GUI
+egui_glium = { version = "0.16.0", default_features = false, features = ["clipboard", "links"] } # for GUI
+futures-lite = "1.12.0" # for basic future operations
+glam = "0.20.2" # for linear algebra
+glium = "0.31.0" # for OpenGL rendering
+hematite-nbt = { git = "https://github.com/PistonDevelopers/hematite_nbt", rev = "ce60b81" } # for reading and writing NBT
+home = "0.5.3" # for home directory
+image = { version = "0.23.14", default_features = false, features = ["png"] } # for image loading
+internment = { version = "0.5.5", features = ["arc", "serde"] } # for interning
+lazy_static = "1.4.0" # for lazy static variables
+native-dialog = "0.6.1" # for native dialogs (e.g. file chooser)
+num-integer = "0.1.44" # for integer traits
+num-traits = "0.2.14" # for numeric traits
+num_cpus = "1.13.1" # for getting number of CPUs
+path-slash = "0.1.4" # for normalizing paths
+positioned-io-preview = "0.3.3" # for random access file I/O
+profiling = "1.0.5" # for profiling
+rayon = "1.5.1" # for parallel operations
+serde = { version = "1.0.133", features = ["derive"] } # for serialization
+serde_json = "1.0.74" # for JSON serialization
+serde_with = "1.11.0" # for serialization utilities
+sha-1 = "0.10.0" # for SHA-1 hashing
+structopt = "0.3.25" # for command line argument parsing
+tracy-client = { version = "0.12.6", optional = true } # for profiling
+tracy-client-sys = { version = "0.16.0", optional = true } # for profiling
+winit = "0.26.1" # for window handling and event handling
+zip = "0.5.13" # for reading ZIP files
 
 [patch.crates-io]
 tracy-client-sys = { git = "https://github.com/Earthcomputer/rust_tracy_client" }

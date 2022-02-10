@@ -9,7 +9,6 @@ use std::sync::atomic::{AtomicUsize, Ordering};
 use ahash::AHashMap;
 use dashmap::DashMap;
 use dashmap::mapref::one::{Ref, RefMut};
-use delegate::delegate;
 use glium::implement_vertex;
 use lazy_static::lazy_static;
 use rayon::prelude::*;
@@ -136,32 +135,6 @@ pub fn is_dir(path: &Path) -> bool {
         path = linked;
     }
     path.is_dir()
-}
-
-pub struct ReadDelegate<'a> {
-    delegate: &'a mut dyn std::io::Read
-}
-
-//noinspection RsTraitImplementation
-impl<'a> std::io::Read for ReadDelegate<'a> {
-    delegate! {
-        to self.delegate {
-            fn read(&mut self, buf: &mut [u8]) -> std::io::Result<usize>;
-            fn read_vectored(&mut self, bufs: &mut [std::io::IoSliceMut<'_>]) -> std::io::Result<usize>;
-            fn is_read_vectored(&self) -> bool;
-            fn read_to_end(&mut self, buf: &mut Vec<u8>) -> std::io::Result<usize>;
-            fn read_to_string(&mut self, buf: &mut String) -> std::io::Result<usize>;
-            fn read_exact(&mut self, buf: &mut [u8]) -> std::io::Result<()>;
-            fn read_buf(&mut self, buf: &mut std::io::ReadBuf<'_>) -> std::io::Result<()>;
-            fn read_buf_exact(&mut self, buf: &mut std::io::ReadBuf<'_>) -> std::io::Result<()>;
-        }
-    }
-}
-
-impl<'a> ReadDelegate<'a> {
-    pub fn new(delegate: &'a mut dyn std::io::Read) -> Self {
-        ReadDelegate { delegate }
-    }
 }
 
 pub trait DeserializeFromString {
