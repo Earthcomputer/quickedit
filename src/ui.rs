@@ -1,44 +1,25 @@
-use conrod_core::{Colorable, event, input, Labelable, Positionable, Sizeable, widget, Widget, widget_ids};
 use glam::{DMat2, DVec2};
 use lazy_static::lazy_static;
-use winit::dpi;
+use winit::{dpi, event};
 use std::cell::RefCell;
+use egui::Color32;
 use crate::{minecraft, world, renderer};
 use crate::util::MainThreadStore;
 
-widget_ids!(pub struct Ids {
-    debug,
-    open_button,
-});
-
+#[derive(Default)]
 pub struct UiState {
-    ids: Ids,
     key_states: KeyStates,
 }
 
 #[derive(Default)]
 struct KeyStates {
     mouse_grabbed: bool,
-    neg_x_down: bool,
-    pos_x_down: bool,
-    neg_y_down: bool,
-    pos_y_down: bool,
-    neg_z_down: bool,
-    pos_z_down: bool,
-    neg_yaw_down: bool,
-    pos_yaw_down: bool,
-    neg_pitch_down: bool,
-    pos_pitch_down: bool,
     mouse_dx: f64,
     mouse_dy: f64,
 }
 
-pub fn init_ui(ui: &mut conrod_core::Ui) -> UiState {
-    return UiState { ids: Ids::new(ui.widget_id_generator()), key_states: KeyStates::default() };
-}
-
 #[profiling::function]
-pub fn set_ui(state: &UiState, ui: &mut conrod_core::UiCell) {
+pub fn run_ui(_state: &UiState, egui_ctx: &egui::CtxRef, _quit: &mut bool) {
     let (x, y, z, yaw, pitch) = {
         let worlds = world::WORLDS.read().unwrap();
         match worlds.last() {
@@ -49,19 +30,21 @@ pub fn set_ui(state: &UiState, ui: &mut conrod_core::UiCell) {
             None => (0.0, 0.0, 0.0, 0.0, 0.0),
         }
     };
-    widget::Text::new(format!("Pos: {:.2}, {:.2}, {:.2}, yaw: {:.2}, pitch: {:.2}", x, y, z, yaw, pitch).as_str())
-        .mid_left_of(ui.window)
-        .color(conrod_core::color::WHITE)
-        .set(state.ids.debug, ui);
-
-    if widget::Button::new()
-        .label("Open")
-        .top_left_of(ui.window)
-        .w_h(200.0, 50.0)
-        .set(state.ids.open_button, ui)
-        .was_clicked() {
-        open_clicked();
-    }
+    egui::TopBottomPanel::top("top_panel").show(egui_ctx, |ui| {
+        if ui.button("Open")
+            .clicked()
+        {
+            open_clicked();
+        }
+    });
+    egui::SidePanel::left("left_panel").show(egui_ctx, |ui| {
+        ui.with_layout(egui::Layout::top_down(egui::Align::LEFT), |ui| {
+            ui.colored_label(
+                Color32::WHITE,
+                format!("Pos: {:.2}, {:.2}, {:.2}, yaw: {:.2}, pitch: {:.2}", x, y, z, yaw, pitch).as_str()
+            );
+        });
+    });
 }
 
 fn open_clicked() {
@@ -87,29 +70,33 @@ lazy_static! {
 }
 
 #[profiling::function]
-pub fn handle_event(ui_state: &mut UiState, ui: &conrod_core::Ui, event: &event::Event) {
-    #[profiling::function]
-    fn move_cursor_to_middle() -> Result<(), winit::error::ExternalError> {
-        let gl_window = {
-            profiling::scope!("get_window");
-            renderer::get_display().gl_window()
-        };
-        let window = gl_window.window();
-        let window_size = {
-            profiling::scope!("get_window_size");
-            *WINDOW_SIZE.borrow_mut().get_or_insert_with(|| {
-                println!("Getting window size");
-                let size = window.inner_size();
-                (size.width, size.height)
-            })
-        };
-        profiling::scope!("move_cursor_to_middle");
-        window.set_cursor_position(dpi::PhysicalPosition::new(window_size.0 as f32 * 0.5, window_size.1 as f32 * 0.5))
-    }
+fn move_cursor_to_middle() -> Result<(), winit::error::ExternalError> {
+    let gl_window = {
+        profiling::scope!("get_window");
+        renderer::get_display().gl_window()
+    };
+    let window = gl_window.window();
+    let window_size = {
+        profiling::scope!("get_window_size");
+        *WINDOW_SIZE.borrow_mut().get_or_insert_with(|| {
+            println!("Getting window size");
+            let size = window.inner_size();
+            (size.width, size.height)
+        })
+    };
+    profiling::scope!("move_cursor_to_middle");
+    window.set_cursor_position(dpi::PhysicalPosition::new(window_size.0 as f32 * 0.5, window_size.1 as f32 * 0.5))
+}
 
+#[profiling::function]
+pub fn handle_event(ui_state: &mut UiState, event: &event::WindowEvent) {
     match event {
-        event::Event::Ui(event::Ui::Press(Some(pressed_id), event::Press{button: event::Button::Mouse(input::MouseButton::Left, _), ..})) => {
-            if *pressed_id == ui.window && !ui_state.key_states.mouse_grabbed {
+        event::WindowEvent::MouseInput {
+            state: event::ElementState::Pressed,
+            button: event::MouseButton::Left,
+            ..
+        } => {
+            if !ui_state.key_states.mouse_grabbed {
                 ui_state.key_states.mouse_grabbed = true;
                 if renderer::get_display().gl_window().window().set_cursor_grab(true).is_ok() {
                     renderer::get_display().gl_window().window().set_cursor_visible(false);
@@ -117,64 +104,14 @@ pub fn handle_event(ui_state: &mut UiState, ui: &conrod_core::Ui, event: &event:
                 }
             }
         }
-        event::Event::Raw(event::Input::Press(input::Button::Keyboard(key))) => {
-            if ui_state.key_states.mouse_grabbed {
-                match key {
-                    input::Key::Escape => {
-                        ui_state.key_states.mouse_grabbed = false;
-                        if renderer::get_display().gl_window().window().set_cursor_grab(false).is_ok() {
-                            renderer::get_display().gl_window().window().set_cursor_visible(true);
-                        }
-                    }
-                    input::Key::A => ui_state.key_states.neg_x_down = true,
-                    input::Key::D => ui_state.key_states.pos_x_down = true,
-                    input::Key::Space => ui_state.key_states.pos_y_down = true,
-                    input::Key::LShift => ui_state.key_states.neg_y_down = true,
-                    input::Key::S => ui_state.key_states.pos_z_down = true,
-                    input::Key::W => ui_state.key_states.neg_z_down = true,
-                    input::Key::Left => ui_state.key_states.pos_yaw_down = true,
-                    input::Key::Right => ui_state.key_states.neg_yaw_down = true,
-                    input::Key::Up => ui_state.key_states.pos_pitch_down = true,
-                    input::Key::Down => ui_state.key_states.neg_pitch_down = true,
-                    _ => {}
-                }
-            }
-        }
-        event::Event::Raw(event::Input::Release(input::Button::Keyboard(key))) => {
-            match key {
-                input::Key::A => ui_state.key_states.neg_x_down = false,
-                input::Key::D => ui_state.key_states.pos_x_down = false,
-                input::Key::Space => ui_state.key_states.pos_y_down = false,
-                input::Key::LShift => ui_state.key_states.neg_y_down = false,
-                input::Key::S => ui_state.key_states.pos_z_down = false,
-                input::Key::W => ui_state.key_states.neg_z_down = false,
-                input::Key::Left => ui_state.key_states.pos_yaw_down = false,
-                input::Key::Right => ui_state.key_states.neg_yaw_down = false,
-                input::Key::Up => ui_state.key_states.pos_pitch_down = false,
-                input::Key::Down => ui_state.key_states.neg_pitch_down = false,
-                _ => {}
-            }
-        }
-        event::Event::Raw(event::Input::Motion(input::Motion::MouseCursor { x, y })) => {
-            if ui_state.key_states.mouse_grabbed {
-                let window_point = ui.xy_of(ui.window).unwrap();
-                ui_state.key_states.mouse_dx += x - window_point[0];
-                ui_state.key_states.mouse_dy += y - window_point[1];
-                if move_cursor_to_middle().is_err() {
-                    // unsupported on this platform
-                    ui_state.key_states.mouse_dx = 0.0;
-                    ui_state.key_states.mouse_dy = 0.0;
-                }
-            }
-        }
-        event::Event::Raw(event::Input::Focus(false)) => {
+        event::WindowEvent::Focused(false) => {
             ui_state.key_states.mouse_grabbed = false;
             if renderer::get_display().gl_window().window().set_cursor_grab(false).is_ok() {
                 renderer::get_display().gl_window().window().set_cursor_visible(true);
             }
         }
-        event::Event::Raw(event::Input::Resize(w, h)) => {
-            println!("Resizing window: {}, {}", w, h);
+        event::WindowEvent::Resized(size) => {
+            println!("Resizing window: {}, {}", size.width, size.height);
             *WINDOW_SIZE.borrow_mut() = None;
         }
         _ => {}
@@ -182,7 +119,46 @@ pub fn handle_event(ui_state: &mut UiState, ui: &conrod_core::Ui, event: &event:
 }
 
 #[profiling::function]
-pub fn tick(ui_state: &mut UiState) {
+pub fn handle_device_event(ui_state: &mut UiState, event: &event::DeviceEvent) {
+    match event {
+        event::DeviceEvent::MouseMotion { delta: (x, y) } => {
+            if ui_state.key_states.mouse_grabbed {
+                ui_state.key_states.mouse_dx += *x;
+                ui_state.key_states.mouse_dy += *y;
+                if move_cursor_to_middle().is_err() {
+                    // unsupported on this platform
+                    ui_state.key_states.mouse_dx = 0.0;
+                    ui_state.key_states.mouse_dy = 0.0;
+                }
+            }
+        }
+        event::DeviceEvent::Key(
+            event::KeyboardInput {
+                state: event::ElementState::Pressed,
+                virtual_keycode: Some(key),
+                ..
+            }
+        ) => {
+            if ui_state.key_states.mouse_grabbed && matches!(key, event::VirtualKeyCode::Escape) {
+                ui_state.key_states.mouse_grabbed = false;
+                if renderer::get_display().gl_window().window().set_cursor_grab(false).is_ok() {
+                    renderer::get_display().gl_window().window().set_cursor_visible(true);
+                }
+            }
+        }
+        _ => {}
+    }
+}
+
+#[profiling::function]
+pub fn tick(ui_state: &mut UiState, egui_ctx: &egui::CtxRef) {
+    if ui_state.key_states.mouse_grabbed {
+        handle_camera(ui_state, egui_ctx);
+    }
+}
+
+#[profiling::function]
+fn handle_camera(ui_state: &mut UiState, egui_ctx: &egui::CtxRef) {
     let mut x = 0.0;
     let mut y = 0.0;
     let mut z = 0.0;
@@ -193,38 +169,38 @@ pub fn tick(ui_state: &mut UiState) {
     let rotation_speed = 3.0;
     let mouse_sensitivity = 0.05;
 
-    if ui_state.key_states.neg_x_down {
+    if egui_ctx.input().key_down(egui::Key::A) {
         x -= movement_speed;
     }
-    if ui_state.key_states.pos_x_down {
+    if egui_ctx.input().key_down(egui::Key::D) {
         x += movement_speed;
     }
-    if ui_state.key_states.neg_y_down {
+    if egui_ctx.input().modifiers.shift {
         y -= movement_speed;
     }
-    if ui_state.key_states.pos_y_down {
+    if egui_ctx.input().key_down(egui::Key::Space) {
         y += movement_speed;
     }
-    if ui_state.key_states.neg_z_down {
+    if egui_ctx.input().key_down(egui::Key::W) {
         z -= movement_speed;
     }
-    if ui_state.key_states.pos_z_down {
+    if egui_ctx.input().key_down(egui::Key::S) {
         z += movement_speed;
     }
-    if ui_state.key_states.neg_yaw_down {
+    if egui_ctx.input().key_down(egui::Key::ArrowRight) {
         yaw -= rotation_speed;
     }
-    if ui_state.key_states.pos_yaw_down {
+    if egui_ctx.input().key_down(egui::Key::ArrowLeft) {
         yaw += rotation_speed;
     }
-    if ui_state.key_states.neg_pitch_down {
+    if egui_ctx.input().key_down(egui::Key::ArrowDown) {
         pitch -= rotation_speed;
     }
-    if ui_state.key_states.pos_pitch_down {
+    if egui_ctx.input().key_down(egui::Key::ArrowUp) {
         pitch += rotation_speed;
     }
     yaw -= ui_state.key_states.mouse_dx as f32 * mouse_sensitivity;
-    pitch += ui_state.key_states.mouse_dy as f32 * mouse_sensitivity;
+    pitch -= ui_state.key_states.mouse_dy as f32 * mouse_sensitivity;
     ui_state.key_states.mouse_dx = 0.0;
     ui_state.key_states.mouse_dy = 0.0;
     if x != 0.0 || y != 0.0 || z != 0.0 || yaw != 0.0 || pitch != 0.0 {

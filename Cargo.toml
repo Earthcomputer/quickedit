@@ -10,11 +10,10 @@ build = "build.rs"
 
 [dependencies]
 profiling = "1.0.5"
-glium = "0.28.0"
-winit = "0.23.0"
-conrod_core = "0.76.0"
-conrod_glium = "0.76.0"
-conrod_winit = "0.76.0"
+glium = "0.31.0"
+winit = "0.26.1"
+egui = { version = "0.16.1", default_features = false, features = ["single_threaded"]}
+egui_glium = { version = "0.16.0", default_features = false, features = ["clipboard", "links"] }
 native-dialog = "0.6.1"
 num-integer = "0.1.44"
 num-traits = "0.2.14"

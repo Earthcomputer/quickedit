@@ -29,19 +29,11 @@ mod geom;
 mod blocks;
 mod debug;
 
-extern crate conrod_core;
-extern crate conrod_glium;
-extern crate conrod_winit;
-extern crate glium;
-extern crate native_dialog;
-
-use std::cell::RefCell;
 use std::path::PathBuf;
-use std::rc::Rc;
 use std::sync::{Mutex, RwLock, RwLockReadGuard};
 use std::{thread, time};
 use std::collections::vec_deque::VecDeque;
-use conrod_core::text;
+use egui::{FontData, FontDefinitions, FontFamily};
 use glium::{glutin::{dpi, event, event_loop, window, ContextBuilder}, Display};
 use glium::Surface;
 use image::GenericImageView;
@@ -110,72 +102,37 @@ enum Request<'a, 'b: 'a> {
 
 pub static mut MAIN_THREAD: Option<thread::ThreadId> = None;
 
-fn run_loop<F>(display: Display, event_loop: event_loop::EventLoop<()>, _ui_state: Rc<RefCell<UiState>>, mut callback: F) -> !
-where
-    F: 'static + FnMut(Request, &Display),
-{
-    let mut next_update = None;
-    let mut ui_update_needed = false;
-    event_loop.run(move |event, _, control_flow| {
-        {
-            let mut should_update_ui = false;
-            let mut should_exit = false;
-            callback(Request::Event {
-                event: &event,
-                should_update_ui: &mut should_update_ui,
-                should_exit: &mut should_exit,
-            }, &display);
-            ui_update_needed |= should_update_ui;
-            if should_exit {
-                *control_flow = glium::glutin::event_loop::ControlFlow::Exit;
-                return;
-            }
-        }
+fn create_display(event_loop: &event_loop::EventLoop<()>) -> glium::Display {
+    let window_builder = window::WindowBuilder::new()
+        .with_resizable(true)
+        .with_title("QuickEdit")
+        .with_window_icon(Some(ICON.with(|i| i.clone())))
+        .with_inner_size(dpi::LogicalSize::new(get_config().window_width as f64, get_config().window_height as f64));
 
-        let should_set_ui_on_main_events_cleared = next_update.is_none() && ui_update_needed;
-        match (&event, should_set_ui_on_main_events_cleared) {
-            (glium::glutin::event::Event::NewEvents(glium::glutin::event::StartCause::Init { .. }), _)
-            | (glium::glutin::event::Event::NewEvents(glium::glutin::event::StartCause::ResumeTimeReached { .. }), _)
-            | (glium::glutin::event::Event::MainEventsCleared, true) => {
-                next_update = Some(std::time::Instant::now() + std::time::Duration::from_millis(MSPT));
-                ui_update_needed = false;
-                let mut needs_redraw = false;
-                callback(Request::SetUi {
-                    needs_redraw: &mut needs_redraw,
-                }, &display);
-                if needs_redraw {
-                    display.gl_window().window().request_redraw();
-                }
-                profiling::finish_frame!();
-            }
-            _ => {}
-        }
-        if let Some(next_update) = next_update {
-            *control_flow = glium::glutin::event_loop::ControlFlow::WaitUntil(next_update);
-        } else {
-            *control_flow = glium::glutin::event_loop::ControlFlow::Wait;
-        }
+    let context_builder = ContextBuilder::new()
+        .with_depth_buffer(24)
+        .with_srgb(true)
+        .with_stencil_buffer(0)
+        .with_vsync(true);
 
-        if let glium::glutin::event::Event::RedrawRequested(_) = &event {
-            callback(Request::Redraw, &display);
-        }
-    })
+    Display::new(window_builder, context_builder, event_loop).unwrap()
 }
-
-conrod_winit::v023_conversion_fns!();
 
 fn main() {
     profiling::register_thread!("main");
 
     let args: CmdLineArgs = CmdLineArgs::from_args();
 
-    let event_loop = event_loop::EventLoop::new();
-    let wb = window::WindowBuilder::new()
-        .with_title("QuickEdit")
-        .with_window_icon(Some(ICON.with(|i| i.clone())))
-        .with_inner_size(dpi::LogicalSize::new(get_config().window_width as f64, get_config().window_height as f64));
-    let cb = ContextBuilder::new().with_depth_buffer(24);
-    let display = Display::new(wb, cb, &event_loop).unwrap();
+    let event_loop = event_loop::EventLoop::with_user_event();
+    let display = create_display(&event_loop);
+
+    let mut egui_glium = egui_glium::EguiGlium::new(&display);
+
+    let mut fonts = FontDefinitions::default();
+    fonts.font_data.insert("MinecraftRegular".to_owned(), FontData::from_static(FONT_DATA));
+    fonts.fonts_for_family.get_mut(&FontFamily::Proportional).unwrap().insert(0, "MinecraftRegular".to_owned());
+    fonts.fonts_for_family.get_mut(&FontFamily::Monospace).unwrap().push("MinecraftRegular".to_owned());
+    egui_glium.egui_ctx.set_fonts(fonts);
 
     let _main_thread_data = unsafe {
         MAIN_THREAD = Some(thread::current().id());
@@ -216,99 +173,94 @@ fn main() {
         worlds.push(world);
     }
 
-    let mut my_ui = conrod_core::UiBuilder::new([get_config().window_width as f64, get_config().window_height as f64]).build();
-    let image_map = conrod_core::image::Map::<glium::texture::Texture2d>::new();
-    let mut renderer = conrod_glium::Renderer::new(&display).unwrap();
-
-    my_ui.fonts.insert(text::Font::from_bytes(FONT_DATA).unwrap());
-
-    let ui_state = Rc::new(RefCell::new(ui::init_ui(&mut my_ui)));
+    let mut ui_state = UiState::default();
 
     unsafe {
         renderer::clear_display();
     }
 
-    run_loop(display, event_loop, ui_state.clone(), move |request, display| {
+    event_loop.run(move |event, _, control_flow| {
         unsafe {
-            renderer::set_display(display);
+            renderer::set_display(&display);
         }
-        match request {
-            Request::Event {
-                event,
-                should_update_ui,
-                should_exit,
-            } => {
-                if let Some(event) = convert_event(event, display.gl_window().window()) {
-                    {
-                        profiling::scope!("conrod_ui::handle_event");
-                        my_ui.handle_event(event);
-                    }
-                    for event in my_ui.global_input().events() {
-                        let mut state = {
-                            profiling::scope!("ui_state.borrow_mut");
-                            ui_state.borrow_mut()
-                        };
-                        ui::handle_event(&mut *state, &my_ui, event);
-                    }
-                    *should_update_ui = true;
-                }
 
-                if let event::Event::WindowEvent { event: event::WindowEvent::CloseRequested, .. } = event {
-                    *should_exit = true
+        let mut redraw = || {
+            let start_time = std::time::Instant::now();
+
+            {
+                profiling::scope!("queued_tasks");
+                let mut queued_tasks = QUEUED_TASKS.lock().unwrap();
+                for task in queued_tasks.drain(..) {
+                    task();
                 }
-            },
-            Request::SetUi { needs_redraw } => {
-                let start_time = time::Instant::now();
-                {
-                    profiling::scope!("queued_tasks");
-                    let mut queued_tasks = QUEUED_TASKS.lock().unwrap();
-                    for task in queued_tasks.drain(..) {
-                        task();
-                    }
+            }
+
+            let mut quit = false;
+
+            let (_, shapes) = egui_glium.run(&display, |egui_ctx| {
+                ui::run_ui(&ui_state, egui_ctx, &mut quit);
+                ui::tick(&mut ui_state, egui_ctx);
+            });
+
+            World::tick();
+
+            {
+                profiling::scope!("non_urgent_queued_tasks");
+                let mut non_urgent_queued_tasks = NON_URGENT_QUEUED_TASKS.lock().unwrap();
+                while !non_urgent_queued_tasks.is_empty() && time::Instant::now() - start_time < time::Duration::from_millis(MSPT) {
+                    let task = non_urgent_queued_tasks.pop_front().unwrap();
+                    task();
                 }
-                let my_ui = &mut my_ui.set_widgets();
-                ui::set_ui(&*(*ui_state).borrow(), my_ui);
-                ui::tick(&mut *(*ui_state).borrow_mut());
-                World::tick();
-                *needs_redraw = my_ui.has_changed() || {
-                    let worlds = world::WORLDS.read().unwrap();
-                    worlds.iter().any(|world| world.renderer.has_changed())
-                };
-                {
-                    profiling::scope!("non_urgent_queued_tasks");
-                    let mut non_urgent_queued_tasks = NON_URGENT_QUEUED_TASKS.lock().unwrap();
-                    while !non_urgent_queued_tasks.is_empty() && time::Instant::now() - start_time < time::Duration::from_millis(MSPT) {
-                        let task = non_urgent_queued_tasks.pop_front().unwrap();
-                        task();
-                    }
-                }
-            },
-            Request::Redraw => {
-                {
-                    profiling::scope!("setup_ui_primitives");
-                    let primitives = my_ui.draw();
-                    renderer.fill(display, primitives, &image_map);
-                };
+            }
+
+            *control_flow = if quit {
+                event_loop::ControlFlow::Exit
+            } else {
+                let next_time = start_time + std::time::Duration::from_millis(MSPT);
+                event_loop::ControlFlow::WaitUntil(next_time)
+            };
+
+            {
                 let mut target = display.draw();
                 target.clear_color_and_depth((0.0, 0.0, 0.0, 1.0), 1.0);
-
                 {
                     let worlds = world::WORLDS.read().unwrap();
                     if let Some(world) = worlds.last() {
                         world.renderer.render_world(&*world, &mut target);
                     }
                 }
+                egui_glium.paint(&display, &mut target, shapes);
+                target.finish().unwrap();
+            }
+        };
 
-                {
-                    profiling::scope!("render_ui");
-                    renderer.draw(display, &mut target, &image_map).unwrap();
-                }
-                {
-                    profiling::scope!("finish_drawing");
-                    target.finish().unwrap();
+        match event {
+            event::Event::RedrawEventsCleared if cfg!(windows) => redraw(),
+            event::Event::RedrawRequested(_) if !cfg!(windows) => redraw(),
+            event::Event::NewEvents(start_cause) => {
+                if matches!(start_cause, event::StartCause::Init | event::StartCause::ResumeTimeReached { .. }) {
+                    display.gl_window().window().request_redraw();
                 }
             }
+            event::Event::WindowEvent { event, .. } => {
+                if matches!(event, event::WindowEvent::CloseRequested | event::WindowEvent::Destroyed) {
+                    *control_flow = event_loop::ControlFlow::Exit;
+                }
+
+                if !egui_glium.on_event(&event) {
+                    ui::handle_event(&mut ui_state, &event);
+                }
+
+                display.gl_window().window().request_redraw();
+            }
+            event::Event::DeviceEvent { event, .. } => {
+                ui::handle_device_event(&mut ui_state, &event);
+
+                display.gl_window().window().request_redraw();
+            }
+            _ => {}
         }
+
         unsafe {
             renderer::clear_display();
         }
