@@ -599,7 +599,7 @@ impl World {
         let level_dat = path.join("level.dat");
         let level_dat: LevelDat = nbt::from_gzip_reader(fs::File::open(level_dat)?)?;
         let mc_version = level_dat.data.version.as_ref().map(|v| &v.name).unwrap_or(&minecraft::ABSENT_MINECRAFT_VERSION.to_string()).clone();
-        let resources = match resources::Resources::load(&mc_version, &Vec::new(), interaction_handler) {
+        let resources = match resources::loader::load(&mc_version, &Vec::new(), interaction_handler) {
             Some(r) => Arc::new(r),
             None => return Err(io::Error::new(io::ErrorKind::Other, "Failed to load resources")),
         };

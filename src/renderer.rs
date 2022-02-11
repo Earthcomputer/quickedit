@@ -11,7 +11,7 @@ use num_traits::FloatConst;
 use crate::{blocks, CommonFNames, geom, make_a_hash_map, profile_mutex, util};
 use crate::debug::{ProfileMutex, ProfileMutexGuard};
 use crate::geom::{BlockPos, ChunkPos, IVec3RangeExtensions, IVec2RangeExtensions, IVec2Extensions};
-use crate::resources::{Resources, TextureAtlas};
+use crate::resources::{Resources, atlas::TextureAtlas};
 use crate::util::{BlitVertex, FastDashMap, Lerp, MainThreadStore, make_fast_dash_map};
 use crate::world::{Dimension, IBlockState, Subchunk, World, WorldRef};
 use crate::fname::FName;
