@@ -306,6 +306,18 @@ pub struct Config {
     pub window_height: u32,
     pub last_open_path: PathBuf,
     pub auto_open_world: Option<PathBuf>,
+    render_distance: u32,
+    unloaded_render_distance: u32,
+}
+
+impl Config {
+    pub fn render_distance(&self) -> u32 {
+        self.render_distance.clamp(2, 64)
+    }
+
+    pub fn unloaded_render_distance(&self) -> u32 {
+        self.unloaded_render_distance.clamp(2, 64)
+    }
 }
 
 impl Default for Config {
@@ -318,6 +330,8 @@ impl Default for Config {
                 .filter(|p| p.exists())
                 .unwrap_or_else(|| PathBuf::from(".")),
             auto_open_world: None,
+            render_distance: 16,
+            unloaded_render_distance: 32,
         }
     }
 }

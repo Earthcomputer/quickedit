@@ -21,7 +21,7 @@ use lazy_static::lazy_static;
 use num_integer::Integer;
 use positioned_io_preview::{RandomAccessFile, ReadAt, ReadBytesAtExt};
 use crate::fname::{CommonFNames, FName};
-use crate::minecraft;
+use crate::{minecraft, renderer};
 use crate::geom::{BlockPos, ChunkPos, IVec2Extensions, IVec2RangeExtensions};
 use crate::resources;
 use crate::util::{FastDashMap, FastDashRefMut, make_fast_dash_map};
@@ -513,7 +513,7 @@ impl Camera {
 
 #[profiling::function]
 fn chunk_loader(world: Arc<World>, stop: &dyn Fn() -> bool) {
-    let render_distance = 16;
+    let render_distance = crate::get_config().render_distance() as i32;
     let mut prev_dimension: Option<FName> = None;
     let mut prev_chunk_pos: Option<IVec2> = None;
     let mut chunks_to_unload = VecDeque::new();
@@ -625,7 +625,7 @@ impl World {
         world.dimensions.insert(CommonFNames.THE_END.clone(), Arc::new(Dimension::new(CommonFNames.THE_END.clone())));
         let world = WorldRef::new(world);
         world.spawn_worker(chunk_loader);
-        WorldRenderer::start_build_worker(&world);
+        world.spawn_worker(renderer::worker::chunk_render_worker);
         Ok(world)
     }
 

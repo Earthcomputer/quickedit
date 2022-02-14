@@ -42,7 +42,7 @@ impl Resources {
                 let mut model_variant = None;
                 for pair in &variants.pairs {
                     if pair.properties.iter().all(|(k, v)| state.properties.get(k).map(|v2| v == v2).unwrap_or(true)) {
-                        model_variant = Some((&*pair.value).first()?);
+                        model_variant = Some((*pair.value).first()?);
                         break;
                     }
                 }
