@@ -8,7 +8,7 @@ use crate::renderer::storage::{ChunkStore, Geometry, SubchunkGeometry};
 use crate::renderer::{bakery, Transparency};
 use crate::renderer::bakery::BakedModelVertex;
 use crate::{blocks, util, World};
-use crate::world::{Dimension, IBlockState, Subchunk};
+use crate::world::{Dimension, IBlockState, Subchunk, workers};
 
 #[profiling::function]
 pub fn chunk_render_worker(world: Arc<World>, stop: &dyn Fn() -> bool) {
@@ -17,7 +17,7 @@ pub fn chunk_render_worker(world: Arc<World>, stop: &dyn Fn() -> bool) {
         let dimension = match world.get_dimension(&dimension_id) {
             Some(d) => d,
             None => {
-                World::worker_yield();
+                workers::worker_yield();
                 continue;
             }
         };
@@ -56,7 +56,7 @@ pub fn chunk_render_worker(world: Arc<World>, stop: &dyn Fn() -> bool) {
                     if stop() {
                         return;
                     }
-                    World::worker_yield();
+                    workers::worker_yield();
                 }
             }
 
@@ -74,7 +74,7 @@ pub fn chunk_render_worker(world: Arc<World>, stop: &dyn Fn() -> bool) {
         if stop() {
             return;
         }
-        World::worker_yield();
+        workers::worker_yield();
     }
 }
 

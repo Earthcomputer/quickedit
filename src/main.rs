@@ -44,7 +44,7 @@ use structopt::StructOpt;
 use crate::fname::CommonFNames;
 use crate::ui::UiState;
 use crate::util::ResourceLocation;
-use crate::world::World;
+use crate::world::{workers, World};
 
 #[allow(clippy::all)]
 mod gl {
@@ -202,7 +202,7 @@ fn main() {
                 ui::tick(&mut ui_state, egui_ctx);
             });
 
-            World::tick();
+            workers::tick();
 
             {
                 profiling::scope!("non_urgent_queued_tasks");
