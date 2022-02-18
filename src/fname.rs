@@ -1,6 +1,7 @@
 #![allow(non_snake_case)]
 #![allow(non_upper_case_globals)]
 
+use ahash::AHashMap;
 use internment::ArcIntern;
 use lazy_static::lazy_static;
 use crate::ResourceLocation;
@@ -31,6 +32,14 @@ macro_rules! common_fnames {
 }
 lazy_static! {
     pub static ref CommonFNames: _CommonFNames = _CommonFNames::new();
+
+    static ref NUMBERS: AHashMap<FName, u32> = {
+        let mut numbers = AHashMap::new();
+        for i in 0..=16 {
+            numbers.insert(from_str(format!("{}", i)), i);
+        }
+        numbers
+    };
 }
 
 common_fnames! {
@@ -47,8 +56,12 @@ common_fnames! {
     BEDROCK = "bedrock";
     WATER = "water";
     LAVA = "lava";
+    FLOWING_WATER = "flowing_water";
+    FLOWING_LAVA = "flowing_lava";
     SAND = "sand";
     GRAVEL = "gravel";
+    ICE = "ice";
+    FROSTED_ICE = "frosted_ice";
 
     // common states
     HALF = "half";
@@ -64,7 +77,17 @@ common_fnames! {
     ONE = "1";
     POWER = "power";
     SNOWY = "snowy";
+    WATERLOGGED = "waterlogged";
 
     // textures
     MISSINGNO = "missingno";
+    WATER_STILL = "block/water_still";
+    WATER_FLOW = "block/water_flow";
+    WATER_OVERLAY = "block/water_overlay";
+    LAVA_STILL = "block/lava_still";
+    LAVA_FLOW = "block/lava_flow";
+}
+
+pub fn to_int(value: &FName) -> Option<u32> {
+    NUMBERS.get(value).cloned()
 }

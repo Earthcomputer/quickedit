@@ -157,7 +157,7 @@ fn bake_model(world: &World, state: &IBlockState) -> BakedModel {
                 if !dest_face.map(|dest_face| (vert1 * 0.125 - 1.0).dot(dest_face.forward().as_vec3()).abs_diff_eq(&1.0f32, 0.001)).unwrap_or(false) {
                     dest_face = None;
                 }
-                let cull_mask = if let Some(dest_face) = dest_face {
+                let (cull_mask, collision_mask) = if let Some(dest_face) = dest_face {
                     let transform = Affine3A::from_translation(Vec3::new(0.5, 0.5, 0.5))
                         * Affine3A::from_quat(Quat::from_rotation_arc(dest_face.forward().as_vec3(), Vec3::Z))
                         * Affine3A::from_translation(Vec3::new(-0.5, -0.5, -0.5))
@@ -165,6 +165,7 @@ fn bake_model(world: &World, state: &IBlockState) -> BakedModel {
                     let (vert1, vert2, vert4) = (transform.transform_point3(vert1).xy(), transform.transform_point3(vert2).xy(), transform.transform_point3(vert4).xy());
                     let face_transform = Affine2::from_cols(vert2 - vert1, vert4 - vert1, vert1);
                     let mut cull_mask = [IVec4::ZERO, IVec4::ZERO];
+                    let mut collision_mask = [IVec4::ZERO, IVec4::ZERO];
                     for x in 0..16 {
                         for y in 0..16 {
                             let transformed = face_transform.transform_point2(Vec2::new(x as f32 / 16.0, y as f32 / 16.0));
@@ -172,20 +173,24 @@ fn bake_model(world: &World, state: &IBlockState) -> BakedModel {
                             let u = (sprite.u1 as f32).lerp(sprite.u2 as f32, x).round() as i32;
                             let v = (sprite.v1 as f32).lerp(sprite.v2 as f32, y).round() as i32;
                             let alpha = atlas.get_alpha(u.clamp(0, atlas.width as i32 - 1) as u32, v.clamp(0, atlas.height as i32 - 1) as u32);
+                            let mut x = ((x * 16.0).round() as i32).clamp(0, 15);
+                            let mut y = ((y * 16.0).round() as i32).clamp(0, 15);
+                            if dest_face.forward().dot(IVec3::ONE) == -1 {
+                                x = 15 - x;
+                                y = 15 - y;
+                            }
+                            let i1 = (y >> 3) as usize;
+                            let i2 = ((y >> 1) & 3) as usize;
+                            let mask = 1 << (((y & 1) << 4) | x);
+                            collision_mask[i1][i2] |= mask;
                             if alpha == 255 {
-                                let mut x = ((x * 16.0).round() as i32).clamp(0, 15);
-                                let mut y = ((y * 16.0).round() as i32).clamp(0, 15);
-                                if dest_face.forward().dot(IVec3::ONE) == -1 {
-                                    x = 15 - x;
-                                    y = 15 - y;
-                                }
-                                cull_mask[(y >> 3) as usize][((y >> 1) & 3) as usize] |= 1 << (((y & 1) << 4) | x);
+                                cull_mask[i1][i2] |= mask;
                             }
                         }
                     }
-                    cull_mask
+                    (cull_mask, collision_mask)
                 } else {
-                    [IVec4::ZERO, IVec4::ZERO]
+                    ([IVec4::ZERO, IVec4::ZERO], [IVec4::ZERO, IVec4::ZERO])
                 };
                 let dest_face = baked_model.faces.entry(dest_face).or_default();
                 let vert1 = BakedModelVertex {
@@ -212,6 +217,8 @@ fn bake_model(world: &World, state: &IBlockState) -> BakedModel {
                 dest_face.transparency = dest_face.transparency.merge(sprite.transparency);
                 dest_face.cull_mask[0] = dest_face.cull_mask[0] | cull_mask[0];
                 dest_face.cull_mask[1] = dest_face.cull_mask[1] | cull_mask[1];
+                dest_face.collision_mask[0] = dest_face.collision_mask[0] | collision_mask[0];
+                dest_face.collision_mask[1] = dest_face.collision_mask[1] | collision_mask[1];
             }
         }
     }
@@ -252,6 +259,7 @@ fn bake_missingno(atlas: &TextureAtlas) -> BakedModel {
                 ]],
                 transparency: Transparency::Opaque,
                 cull_mask: [!IVec4::ZERO, !IVec4::ZERO],
+                collision_mask: [!IVec4::ZERO, !IVec4::ZERO],
             },
             Some(geom::Direction::PosZ) => BakedModelFace {
                 quads: vec![[
@@ -278,6 +286,7 @@ fn bake_missingno(atlas: &TextureAtlas) -> BakedModel {
                 ]],
                 transparency: Transparency::Opaque,
                 cull_mask: [!IVec4::ZERO, !IVec4::ZERO],
+                collision_mask: [!IVec4::ZERO, !IVec4::ZERO],
             },
             Some(geom::Direction::PosX) => BakedModelFace {
                 quads: vec![[
@@ -304,6 +313,7 @@ fn bake_missingno(atlas: &TextureAtlas) -> BakedModel {
                 ]],
                 transparency: Transparency::Opaque,
                 cull_mask: [!IVec4::ZERO, !IVec4::ZERO],
+                collision_mask: [!IVec4::ZERO, !IVec4::ZERO],
             },
             Some(geom::Direction::NegX) => BakedModelFace {
                 quads: vec![[
@@ -330,6 +340,7 @@ fn bake_missingno(atlas: &TextureAtlas) -> BakedModel {
                 ]],
                 transparency: Transparency::Opaque,
                 cull_mask: [!IVec4::ZERO, !IVec4::ZERO],
+                collision_mask: [!IVec4::ZERO, !IVec4::ZERO],
             },
             Some(geom::Direction::NegY) => BakedModelFace {
                 quads: vec![[
@@ -356,6 +367,7 @@ fn bake_missingno(atlas: &TextureAtlas) -> BakedModel {
                 ]],
                 transparency: Transparency::Opaque,
                 cull_mask: [!IVec4::ZERO, !IVec4::ZERO],
+                collision_mask: [!IVec4::ZERO, !IVec4::ZERO],
             },
             Some(geom::Direction::PosY) => BakedModelFace {
                 quads: vec![[
@@ -382,6 +394,7 @@ fn bake_missingno(atlas: &TextureAtlas) -> BakedModel {
                 ]],
                 transparency: Transparency::Opaque,
                 cull_mask: [!IVec4::ZERO, !IVec4::ZERO],
+                collision_mask: [!IVec4::ZERO, !IVec4::ZERO],
             },
         );
     return BakedModel { faces, ambient_occlusion: false }
@@ -399,6 +412,8 @@ pub(super) struct BakedModelFace {
     pub(super) transparency: Transparency,
     // 256 bits of data, 1 if there is a pixel on the face touching this side
     pub(super) cull_mask: [glam::IVec4; 2],
+    // 256 bits of data, 1 if there is a face covering the given pixel on this side
+    pub(super) collision_mask: [glam::IVec4; 2],
 }
 
 pub(super) struct BakedModelVertex {

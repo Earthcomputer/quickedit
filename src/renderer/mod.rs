@@ -1,5 +1,6 @@
 mod bakery;
 pub mod draw;
+mod liquid;
 mod storage;
 pub mod worker;
 

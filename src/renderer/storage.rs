@@ -7,6 +7,7 @@ use lazy_static::lazy_static;
 use crate::{profile_mutex, renderer, util};
 use crate::debug::{ProfileMutex, ProfileMutexGuard};
 use crate::geom::{ChunkPos, IVec2Extensions, IVec2RangeExtensions};
+use crate::renderer::Transparency;
 use crate::util::MainThreadStore;
 
 pub(super) type Quad<T> = [T; 4];
@@ -45,6 +46,14 @@ impl SubchunkGeometry {
         self.opaque_geometry.quads.clear();
         self.transparent_geometry.quads.clear();
         self.translucent_geometry.quads.clear();
+    }
+
+    pub(super) fn get_geometry(&mut self, transparency: Transparency) -> &mut Geometry {
+        match transparency {
+            Transparency::Opaque => &mut self.opaque_geometry,
+            Transparency::Transparent => &mut self.transparent_geometry,
+            Transparency::Translucent => &mut self.translucent_geometry,
+        }
     }
 }
 

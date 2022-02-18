@@ -5,9 +5,10 @@ use glam::IVec4;
 use crate::fname::FName;
 use crate::geom::{BlockPos, ChunkPos, IVec2Extensions, IVec2RangeExtensions, IVec3RangeExtensions};
 use crate::renderer::storage::{ChunkStore, Geometry, SubchunkGeometry};
-use crate::renderer::{bakery, Transparency};
+use crate::renderer::bakery;
 use crate::renderer::bakery::BakedModelVertex;
-use crate::{blocks, util, World};
+use crate::{blocks, renderer, util, World};
+use crate::blocks::Fluid;
 use crate::world::{Dimension, IBlockState, Subchunk, workers};
 
 #[profiling::function]
@@ -179,11 +180,7 @@ fn render_state(world: &World, dimension: &Dimension, state: &IBlockState, pos: 
                 }
             }
         }
-        let geom = match face.transparency {
-            Transparency::Opaque => &mut out_geometry.opaque_geometry,
-            Transparency::Transparent => &mut out_geometry.transparent_geometry,
-            Transparency::Translucent => &mut out_geometry.translucent_geometry,
-        };
+        let geom = out_geometry.get_geometry(face.transparency);
         for quad in &face.quads {
             let convert_vertex = |vertex: &BakedModelVertex| {
                 util::Vertex {
@@ -199,5 +196,9 @@ fn render_state(world: &World, dimension: &Dimension, state: &IBlockState, pos: 
             };
             geom.quads.push([convert_vertex(&quad[0]), convert_vertex(&quad[1]), convert_vertex(&quad[2]), convert_vertex(&quad[3])]);
         }
+    }
+
+    if blocks::get_fluid(state) != Fluid::Empty {
+        renderer::liquid::render_fluid(world, dimension, state, pos, world_pos, out_geometry);
     }
 }

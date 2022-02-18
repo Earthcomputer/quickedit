@@ -195,68 +195,73 @@ fn load_models(_mc_version: &str, resource_packs: &mut [Box<dyn ResourcePack>], 
 
 #[profiling::function]
 fn load_textures(_mc_version: &str, resource_packs: &mut [Box<dyn ResourcePack>], resources: &mut Resources) {
-    let mut textures = AHashMap::new();
+    let mut textures_to_load = AHashSet::new();
     for model in resources.block_models.values() {
         for texture in model.textures.values() {
-            if textures.contains_key(texture) {
-                continue;
+            textures_to_load.insert(texture);
+        }
+    }
+    for texture in &*resources::builtin::EXTRA_TEXTURES {
+        textures_to_load.insert(texture);
+    }
+
+    let mut textures = AHashMap::with_capacity(textures_to_load.len() + 1);
+    for texture in textures_to_load {
+        let png_data = {
+            let mut texture_reader = match get_resource(resource_packs, format!("assets/{}/textures/{}.png", texture.namespace, texture.name).as_str()) {
+                Ok(Some(reader)) => reader,
+                _ => {
+                    eprintln!("Texture not found: {}", texture);
+                    continue
+                }
+            };
+            let mut png_data = Vec::new();
+            if texture_reader.read_to_end(&mut png_data).is_err() {
+                eprintln!("Error reading texture: {}", texture);
+                continue
             }
-            let png_data = {
-                let mut texture_reader = match get_resource(resource_packs, format!("assets/{}/textures/{}.png", texture.namespace, texture.name).as_str()) {
-                    Ok(Some(reader)) => reader,
-                    _ => {
-                        eprintln!("Texture not found: {}", texture);
+            png_data
+        };
+        let image = match image::load(io::Cursor::new(png_data), image::ImageFormat::Png) {
+            Ok(image) => image,
+            Err(err) => {
+                eprintln!("Error loading texture: {}", err);
+                continue
+            }
+        }.to_rgba8();
+        let animation: Option<Animation> = match get_resource(resource_packs, format!("assets/{}/textures/{}.png.mcmeta", texture.namespace, texture.name).as_str()) {
+            Ok(Some(reader)) => {
+                match serde_json::from_reader(reader) {
+                    Ok(animation) => Some(animation),
+                    Err(err) => {
+                        eprintln!("Error loading texture animation: {}", err);
                         continue
                     }
-                };
-                let mut png_data = Vec::new();
-                if texture_reader.read_to_end(&mut png_data).is_err() {
-                    eprintln!("Error reading texture: {}", texture);
-                    continue
                 }
-                png_data
-            };
-            let image = match image::load(io::Cursor::new(png_data), image::ImageFormat::Png) {
-                Ok(image) => image,
-                Err(err) => {
-                    eprintln!("Error loading texture: {}", err);
-                    continue
-                }
-            }.to_rgba8();
-            let animation: Option<Animation> = match get_resource(resource_packs, format!("assets/{}/textures/{}.png.mcmeta", texture.namespace, texture.name).as_str()) {
-                Ok(Some(reader)) => {
-                    match serde_json::from_reader(reader) {
-                        Ok(animation) => Some(animation),
-                        Err(err) => {
-                            eprintln!("Error loading texture animation: {}", err);
-                            continue
-                        }
-                    }
-                }
-                Ok(None) => None,
-                Err(err) => {
-                    eprintln!("Error loading texture animation: {}", err);
-                    continue
-                }
-            };
-            let image = if let Some(animation) = animation {
-                if animation.width > 0 {
-                    let height = image.width() * animation.height / animation.width;
-                    if height <= image.height() {
-                        image.view(0, 0, image.width(), height).to_image()
-                    } else {
-                        eprintln!("Invalid texture animation: {}", texture);
-                        continue
-                    }
+            }
+            Ok(None) => None,
+            Err(err) => {
+                eprintln!("Error loading texture animation: {}", err);
+                continue
+            }
+        };
+        let image = if let Some(animation) = animation {
+            if animation.width > 0 {
+                let height = image.width() * animation.height / animation.width;
+                if height <= image.height() {
+                    image.view(0, 0, image.width(), height).to_image()
                 } else {
                     eprintln!("Invalid texture animation: {}", texture);
                     continue
                 }
             } else {
-                image
-            };
-            textures.insert(texture.clone(), image);
-        }
+                eprintln!("Invalid texture animation: {}", texture);
+                continue
+            }
+        } else {
+            image
+        };
+        textures.insert(texture.clone(), image);
     }
 
     textures.insert(CommonFNames.MISSINGNO.clone(), image::load_from_memory_with_format(resources::builtin::MISSINGNO_DATA, image::ImageFormat::Png).unwrap().to_rgba8());

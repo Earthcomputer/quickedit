@@ -190,3 +190,23 @@ pub fn get_block_color(world: &World, dimension: &Dimension, pos: BlockPos, stat
         .map(|provider| provider(world, dimension, pos, state))
         .unwrap_or_else(|| glam::IVec3::new(0xff, 0xff, 0xff))
 }
+
+#[derive(Debug, Clone, Copy, PartialEq, Eq, Hash)]
+pub enum Fluid {
+    Empty,
+    Water,
+    Lava,
+}
+
+pub fn get_fluid(state: &IBlockState) -> Fluid {
+    let block = &state.block;
+    if block == &CommonFNames.WATER || block == &CommonFNames.FLOWING_WATER {
+        Fluid::Water
+    } else if block == &CommonFNames.LAVA || block == &CommonFNames.FLOWING_LAVA {
+        Fluid::Lava
+    } else if state.properties.get(&CommonFNames.WATERLOGGED) == Some(&CommonFNames.ONE) {
+        Fluid::Water
+    } else {
+        Fluid::Empty
+    }
+}

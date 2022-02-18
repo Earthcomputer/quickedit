@@ -2,7 +2,7 @@ use std::io;
 use std::io::{Cursor, Read};
 use ahash::AHashMap;
 use lazy_static::lazy_static;
-use crate::fname;
+use crate::{CommonFNames, fname};
 use crate::fname::FName;
 use crate::make_a_hash_map;
 use crate::ResourceLocation;
@@ -104,6 +104,14 @@ lazy_static! {
         FName::new(ResourceLocation::quickedit("block/black_shulker_box_side")) => include_bytes!("../../res/pack/black_shulker_box_side.png").to_vec(),
         FName::new(ResourceLocation::quickedit("block/black_shulker_box_bottom")) => include_bytes!("../../res/pack/black_shulker_box_bottom.png").to_vec(),
     );
+
+    pub(super) static ref EXTRA_TEXTURES: Vec<FName> = vec![
+        CommonFNames.WATER_STILL.clone(),
+        CommonFNames.WATER_FLOW.clone(),
+        CommonFNames.WATER_OVERLAY.clone(),
+        CommonFNames.LAVA_STILL.clone(),
+        CommonFNames.LAVA_FLOW.clone(),
+    ];
 }
 
 pub const MISSINGNO_DATA: &[u8] = include_bytes!("../../res/missingno.png");

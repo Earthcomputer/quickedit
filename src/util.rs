@@ -125,6 +125,18 @@ macro_rules! make_a_hash_map {
         }
     };
 }
+#[macro_export]
+macro_rules! make_a_hash_set {
+    ($($k:expr),* $(,)?) => {
+        {
+            let mut set = AHashSet::new();
+            $(
+                set.insert($k);
+            )*
+            set
+        }
+    };
+}
 
 pub fn is_dir(path: &Path) -> bool {
     if path.is_dir() {
