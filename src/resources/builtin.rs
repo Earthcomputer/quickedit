@@ -9,6 +9,10 @@ use crate::ResourceLocation;
 use crate::resources::resource_packs::ResourcePack;
 
 lazy_static! {
+    static ref BUILTIN_BLOCKSTATES: AHashMap<FName, &'static str> = make_a_hash_map!(
+        fname::from_str("chest") => include_str!("../../res/pack/chest_blockstate.json"),
+    );
+
     static ref BUILTIN_MODELS: AHashMap<FName, &'static str> = make_a_hash_map!(
         FName::new(ResourceLocation::quickedit("block/empty")) => include_str!("../../res/pack/empty.json"),
         FName::new(ResourceLocation::quickedit("block/white_shulker_box")) => include_str!("../../res/pack/white_shulker_box.json"),
@@ -27,6 +31,8 @@ lazy_static! {
         FName::new(ResourceLocation::quickedit("block/green_shulker_box")) => include_str!("../../res/pack/green_shulker_box.json"),
         FName::new(ResourceLocation::quickedit("block/red_shulker_box")) => include_str!("../../res/pack/red_shulker_box.json"),
         FName::new(ResourceLocation::quickedit("block/black_shulker_box")) => include_str!("../../res/pack/black_shulker_box.json"),
+        FName::new(ResourceLocation::quickedit("block/abstract_chest")) => include_str!("../../res/pack/abstract_chest.json"),
+        FName::new(ResourceLocation::quickedit("block/chest")) => include_str!("../../res/pack/chest.json"),
     );
 
     pub(super) static ref PARENT_INJECTS: AHashMap<FName, FName> = make_a_hash_map!(
@@ -68,6 +74,8 @@ lazy_static! {
         fname::from_str("block/green_shulker_box") => FName::new(ResourceLocation::quickedit("block/green_shulker_box")),
         fname::from_str("block/red_shulker_box") => FName::new(ResourceLocation::quickedit("block/red_shulker_box")),
         fname::from_str("block/black_shulker_box") => FName::new(ResourceLocation::quickedit("block/black_shulker_box")),
+
+        fname::from_str("block/chest") => FName::new(ResourceLocation::quickedit("block/chest")),
     );
 
     static ref BUILTIN_TEXTURES: AHashMap<FName, Vec<u8>> = make_a_hash_map!(
@@ -103,6 +111,10 @@ lazy_static! {
         FName::new(ResourceLocation::quickedit("block/red_shulker_box_bottom")) => include_bytes!("../../res/pack/red_shulker_box_bottom.png").to_vec(),
         FName::new(ResourceLocation::quickedit("block/black_shulker_box_side")) => include_bytes!("../../res/pack/black_shulker_box_side.png").to_vec(),
         FName::new(ResourceLocation::quickedit("block/black_shulker_box_bottom")) => include_bytes!("../../res/pack/black_shulker_box_bottom.png").to_vec(),
+        FName::new(ResourceLocation::quickedit("block/chest_bottom_top")) => include_bytes!("../../res/pack/chest_bottom_top.png").to_vec(),
+        FName::new(ResourceLocation::quickedit("block/chest_front")) => include_bytes!("../../res/pack/chest_front.png").to_vec(),
+        FName::new(ResourceLocation::quickedit("block/chest_side")) => include_bytes!("../../res/pack/chest_side.png").to_vec(),
+        FName::new(ResourceLocation::quickedit("block/chest_lock")) => include_bytes!("../../res/pack/chest_lock.png").to_vec(),
     );
 
     pub(super) static ref EXTRA_TEXTURES: Vec<FName> = vec![
@@ -134,6 +146,10 @@ impl ResourcePack for BuiltinResourcePack {
                 let path = path.strip_suffix(".png")?;
                 let bytes = BUILTIN_TEXTURES.get(&FName::new(ResourceLocation::new(namespace, path)))?;
                 Some(Box::new(Cursor::new(bytes)))
+            } else if typ == "blockstates" {
+                let path = path.strip_suffix(".json")?;
+                let text = BUILTIN_BLOCKSTATES.get(&FName::new(ResourceLocation::new(namespace, path)))?;
+                Some(Box::new(Cursor::new(text.as_bytes())))
             } else {
                 None
             }
@@ -141,7 +157,29 @@ impl ResourcePack for BuiltinResourcePack {
         Ok(do_get_reader(path))
     }
 
-    fn get_sub_files(&self, _path: &str, _suffix: &str) -> Vec<String> {
-        Vec::new()
+    fn get_sub_files(&self, path: &str, suffix: &str) -> Vec<String> {
+        self.try_get_sub_files(path, suffix).unwrap_or_default()
+    }
+}
+
+impl BuiltinResourcePack {
+    fn try_get_sub_files(&self, path: &str, _suffix: &str) -> Option<Vec<String>> {
+        if path == "assets/" {
+            let mut result: Vec<_> = BUILTIN_BLOCKSTATES.keys().map(|key| key.namespace.clone()).collect();
+            result.sort();
+            result.dedup();
+            Some(result)
+        } else {
+            let path = path.strip_prefix("assets/")?;
+            let (namespace, path) = path.split_at(path.find('/')?);
+            let path = path.strip_prefix('/').unwrap();
+            if path == "blockstates/" {
+                let mut result: Vec<_> = BUILTIN_BLOCKSTATES.keys().filter(|key| key.namespace == namespace).map(|key| key.name.clone()).collect();
+                result.sort();
+                Some(result)
+            } else {
+                None
+            }
+        }
     }
 }
