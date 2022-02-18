@@ -89,7 +89,7 @@ impl WorldRenderer {
         let fov = 70.0f32.to_radians();
         let aspect_ratio = target.get_dimensions().0 as f32 / target.get_dimensions().1 as f32;
         let znear = 0.05f32;
-        let zfar = render_distance_chunks as f32 * 64.0;
+        let zfar = render_distance_chunks.max(crate::get_config().unloaded_render_distance) as f32 * 64.0;
         let projection = Mat4::perspective_rh(fov, aspect_ratio, znear, zfar);
         let camera_yaw = yaw.to_radians();
         let camera_pitch = pitch.to_radians();

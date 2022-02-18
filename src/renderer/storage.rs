@@ -166,13 +166,15 @@ impl ChunkStore {
             return current_camera_pos;
         }
 
-        for chunk_pos in camera_pos.square_range(self.render_distance as i32).iter() {
-            let distance = chunk_pos.rectangular_distance(camera_pos) as u32;
-            if distance > self.render_distance {
-                let built_chunk = self.get(chunk_pos);
-                built_chunk.ready.store(false, Ordering::Relaxed);
-                for subchunk in &mut *built_chunk.subchunk_geometry.lock().unwrap() {
-                    subchunk.dirty = true;
+        if let Some(cur_camera_pos) = *current_camera_pos {
+            for chunk_pos in cur_camera_pos.square_range(self.render_distance as i32).iter() {
+                let distance = chunk_pos.rectangular_distance(camera_pos) as u32;
+                if distance > self.render_distance {
+                    let built_chunk = self.get(chunk_pos);
+                    built_chunk.ready.store(false, Ordering::Relaxed);
+                    for subchunk in &mut *built_chunk.subchunk_geometry.lock().unwrap() {
+                        subchunk.dirty = true;
+                    }
                 }
             }
         }
