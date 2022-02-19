@@ -155,14 +155,14 @@ fn get_north_west_fluid_height(dimension: &Dimension, pos: BlockPos, fluid: Flui
 pub(super) fn render_fluid(world: &World, dimension: &Dimension, state: &IBlockState, pos: BlockPos, world_pos: BlockPos, out_geometry: &mut SubchunkGeometry) {
     let fluid = blocks::get_fluid(state);
 
-    let should_render_up = dimension.get_block_state(pos + Direction::Up.forward())
+    let should_render_up = dimension.get_block_state(world_pos + BlockPos::Y)
         .map(|s| blocks::get_fluid(&s) != fluid)
         .unwrap_or(true);
-    let should_render_down = should_render_side(world, dimension, fluid, pos, Direction::Down);
-    let should_render_north = should_render_side(world, dimension, fluid, pos, Direction::North);
-    let should_render_south = should_render_side(world, dimension, fluid, pos, Direction::South);
-    let should_render_east = should_render_side(world, dimension, fluid, pos, Direction::East);
-    let should_render_west = should_render_side(world, dimension, fluid, pos, Direction::West);
+    let should_render_down = should_render_side(world, dimension, fluid, world_pos, Direction::Down);
+    let should_render_north = should_render_side(world, dimension, fluid, world_pos, Direction::North);
+    let should_render_south = should_render_side(world, dimension, fluid, world_pos, Direction::South);
+    let should_render_east = should_render_side(world, dimension, fluid, world_pos, Direction::East);
+    let should_render_west = should_render_side(world, dimension, fluid, world_pos, Direction::West);
     if !should_render_up && !should_render_down && !should_render_north && !should_render_south && !should_render_east && !should_render_west {
         return;
     }
@@ -180,10 +180,10 @@ pub(super) fn render_fluid(world: &World, dimension: &Dimension, state: &IBlockS
         )
     };
 
-    let mut nw_height = get_north_west_fluid_height(dimension, pos, fluid);
-    let mut ne_height = get_north_west_fluid_height(dimension, pos + BlockPos::new(1, 0, 0), fluid);
-    let mut sw_height = get_north_west_fluid_height(dimension, pos + BlockPos::new(0, 0, 1), fluid);
-    let mut se_height = get_north_west_fluid_height(dimension, pos + BlockPos::new(1, 0, 1), fluid);
+    let mut nw_height = get_north_west_fluid_height(dimension, world_pos, fluid);
+    let mut ne_height = get_north_west_fluid_height(dimension, world_pos + BlockPos::new(1, 0, 0), fluid);
+    let mut sw_height = get_north_west_fluid_height(dimension, world_pos + BlockPos::new(0, 0, 1), fluid);
+    let mut se_height = get_north_west_fluid_height(dimension, world_pos + BlockPos::new(1, 0, 1), fluid);
 
     if should_render_up {
         nw_height -= 0.001;
@@ -191,7 +191,7 @@ pub(super) fn render_fluid(world: &World, dimension: &Dimension, state: &IBlockS
         sw_height -= 0.001;
         se_height -= 0.001;
 
-        let velocity = get_velocity(world, dimension, pos, state, fluid);
+        let velocity = get_velocity(world, dimension, world_pos, state, fluid);
 
         let (u1, v1, u2, v2, u3, v3, u4, v4, transparency) = if velocity.xz() == Vec2::ZERO {
             let u1 = still_sprite.u1 as f32 / atlas.width as f32;
@@ -249,7 +249,7 @@ pub(super) fn render_fluid(world: &World, dimension: &Dimension, state: &IBlockS
         ];
         geometry.quads.push(quad);
         quad.reverse();
-        geometry.quads.push(quad)
+        geometry.quads.push(quad);
     }
 
     if should_render_down {

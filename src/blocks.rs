@@ -1,11 +1,11 @@
-use ahash::AHashMap;
+use ahash::{AHashMap, AHashSet};
 use glam::IVec3;
 use lazy_static::lazy_static;
 use crate::fname;
 use crate::fname::FName;
 use crate::world::{World, IBlockState, Dimension};
 use crate::geom::BlockPos;
-use crate::{CommonFNames, make_a_hash_map};
+use crate::{CommonFNames, make_a_hash_map, make_a_hash_set};
 
 type ColorProvider = fn(&World, &Dimension, BlockPos, &IBlockState) -> glam::IVec3;
 
@@ -38,6 +38,14 @@ lazy_static! {
         fname::from_str("melon_stem") => get_stem_color as ColorProvider,
         fname::from_str("pumpkin_stem") => get_stem_color as ColorProvider,
         fname::from_str("lily_pad") => get_lily_pad_color as ColorProvider,
+    );
+
+    static ref ALWAYS_WATERLOGGED: AHashSet<FName> = make_a_hash_set!(
+        fname::from_str("bubble_column"),
+        fname::from_str("kelp"),
+        fname::from_str("kelp_plant"),
+        fname::from_str("seagrass"),
+        fname::from_str("tall_seagrass"),
     );
 }
 
@@ -204,7 +212,7 @@ pub fn get_fluid(state: &IBlockState) -> Fluid {
         Fluid::Water
     } else if block == &CommonFNames.LAVA || block == &CommonFNames.FLOWING_LAVA {
         Fluid::Lava
-    } else if state.properties.get(&CommonFNames.WATERLOGGED) == Some(&CommonFNames.ONE) {
+    } else if ALWAYS_WATERLOGGED.contains(block) || state.properties.get(&CommonFNames.WATERLOGGED) == Some(&CommonFNames.ONE) {
         Fluid::Water
     } else {
         Fluid::Empty
