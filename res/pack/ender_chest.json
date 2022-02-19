@@ -1,0 +1,10 @@
+{
+  "parent": "quickedit:block/abstract_chest",
+  "textures": {
+    "top": "quickedit:block/ender_chest_top",
+    "bottom": "quickedit:block/ender_chest_bottom",
+    "front": "quickedit:block/ender_chest_front",
+    "side": "quickedit:block/ender_chest_side",
+    "lock": "quickedit:block/ender_chest_lock"
+  }
+}

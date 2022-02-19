@@ -1,0 +1,6 @@
+{
+  "parent": "block/chest",
+  "textures": {
+    "front": "quickedit:block/trapped_chest_front"
+  }
+}

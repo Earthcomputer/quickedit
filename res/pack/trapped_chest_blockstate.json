@@ -1,0 +1,19 @@
+{
+  "variants": {
+    "facing=east": {
+      "model": "quickedit:block/trapped_chest",
+      "y": 90
+    },
+    "facing=north": {
+      "model": "quickedit:block/trapped_chest"
+    },
+    "facing=south": {
+      "model": "quickedit:block/trapped_chest",
+      "y": 180
+    },
+    "facing=west": {
+      "model": "quickedit:block/trapped_chest",
+      "y": 270
+    }
+  }
+}

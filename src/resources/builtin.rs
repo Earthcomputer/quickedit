@@ -11,6 +11,8 @@ use crate::resources::resource_packs::ResourcePack;
 lazy_static! {
     static ref BUILTIN_BLOCKSTATES: AHashMap<FName, &'static str> = make_a_hash_map!(
         fname::from_str("chest") => include_str!("../../res/pack/chest_blockstate.json"),
+        fname::from_str("trapped_chest") => include_str!("../../res/pack/trapped_chest_blockstate.json"),
+        fname::from_str("ender_chest") => include_str!("../../res/pack/ender_chest_blockstate.json"),
     );
 
     static ref BUILTIN_MODELS: AHashMap<FName, &'static str> = make_a_hash_map!(
@@ -33,6 +35,8 @@ lazy_static! {
         FName::new(ResourceLocation::quickedit("block/black_shulker_box")) => include_str!("../../res/pack/black_shulker_box.json"),
         FName::new(ResourceLocation::quickedit("block/abstract_chest")) => include_str!("../../res/pack/abstract_chest.json"),
         FName::new(ResourceLocation::quickedit("block/chest")) => include_str!("../../res/pack/chest.json"),
+        FName::new(ResourceLocation::quickedit("block/trapped_chest")) => include_str!("../../res/pack/trapped_chest.json"),
+        FName::new(ResourceLocation::quickedit("block/ender_chest")) => include_str!("../../res/pack/ender_chest.json"),
     );
 
     pub(super) static ref PARENT_INJECTS: AHashMap<FName, FName> = make_a_hash_map!(
@@ -76,6 +80,7 @@ lazy_static! {
         fname::from_str("block/black_shulker_box") => FName::new(ResourceLocation::quickedit("block/black_shulker_box")),
 
         fname::from_str("block/chest") => FName::new(ResourceLocation::quickedit("block/chest")),
+        fname::from_str("block/ender_chest") => FName::new(ResourceLocation::quickedit("block/ender_chest")),
     );
 
     static ref BUILTIN_TEXTURES: AHashMap<FName, Vec<u8>> = make_a_hash_map!(
@@ -115,6 +120,12 @@ lazy_static! {
         FName::new(ResourceLocation::quickedit("block/chest_front")) => include_bytes!("../../res/pack/chest_front.png").to_vec(),
         FName::new(ResourceLocation::quickedit("block/chest_side")) => include_bytes!("../../res/pack/chest_side.png").to_vec(),
         FName::new(ResourceLocation::quickedit("block/chest_lock")) => include_bytes!("../../res/pack/chest_lock.png").to_vec(),
+        FName::new(ResourceLocation::quickedit("block/trapped_chest_front")) => include_bytes!("../../res/pack/trapped_chest_front.png").to_vec(),
+        FName::new(ResourceLocation::quickedit("block/ender_chest_bottom")) => include_bytes!("../../res/pack/ender_chest_bottom.png").to_vec(),
+        FName::new(ResourceLocation::quickedit("block/ender_chest_top")) => include_bytes!("../../res/pack/ender_chest_top.png").to_vec(),
+        FName::new(ResourceLocation::quickedit("block/ender_chest_front")) => include_bytes!("../../res/pack/ender_chest_front.png").to_vec(),
+        FName::new(ResourceLocation::quickedit("block/ender_chest_side")) => include_bytes!("../../res/pack/ender_chest_side.png").to_vec(),
+        FName::new(ResourceLocation::quickedit("block/ender_chest_lock")) => include_bytes!("../../res/pack/ender_chest_lock.png").to_vec(),
     );
 
     pub(super) static ref EXTRA_TEXTURES: Vec<FName> = vec![
