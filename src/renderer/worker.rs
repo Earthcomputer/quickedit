@@ -3,11 +3,11 @@ use std::sync::Arc;
 use std::sync::atomic::Ordering;
 use glam::IVec4;
 use crate::fname::FName;
-use crate::geom::{BlockPos, ChunkPos, IVec2Extensions, IVec2RangeExtensions, IVec3RangeExtensions};
+use crate::geom::{BlockPos, ChunkPos, IVec2Extensions, IVec3RangeExtensions};
 use crate::renderer::storage::{ChunkStore, Geometry, SubchunkGeometry};
 use crate::renderer::bakery;
 use crate::renderer::bakery::BakedModelVertex;
-use crate::{blocks, renderer, util, World};
+use crate::{blocks, geom, renderer, util, World};
 use crate::blocks::Fluid;
 use crate::world::{Dimension, IBlockState, Subchunk, workers};
 
@@ -24,7 +24,7 @@ pub fn chunk_render_worker(world: Arc<World>, stop: &dyn Fn() -> bool) {
         };
         let render_distance_chunks = crate::get_config().render_distance() as i32;
 
-        for delta in ChunkPos::ZERO.square_range(render_distance_chunks).iter() {
+        for delta in geom::iter_diamond_within_square(ChunkPos::ZERO, render_distance_chunks) {
             let mut chunk_changed = false;
             let mut last_camera_pos = None;
             'subchunk_loop:
@@ -69,6 +69,7 @@ pub fn chunk_render_worker(world: Arc<World>, stop: &dyn Fn() -> bool) {
                     crate::add_non_urgent_queued_task(move || {
                         upload_chunk_geometry(&*world, dimension_id, chunk_pos, render_distance_chunks);
                     });
+                    break;
                 }
             }
         }

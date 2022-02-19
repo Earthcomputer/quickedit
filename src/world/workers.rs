@@ -6,7 +6,7 @@ use glam::{IVec2, Vec3Swizzles};
 use lazy_static::lazy_static;
 use crate::fname::FName;
 use crate::geom::{IVec2Extensions, IVec2RangeExtensions};
-use crate::World;
+use crate::{geom, World};
 
 pub struct WorldRef {
     thread_pool: rayon::ThreadPool,
@@ -159,7 +159,7 @@ pub(super) fn chunk_loader(world: Arc<World>, stop: &dyn Fn() -> bool) {
             },
         };
 
-        for chunk_pos in chunk_pos.square_range(render_distance).iter() {
+        for chunk_pos in geom::iter_diamond_within_square(chunk_pos, render_distance) {
             if dimension.get_chunk(chunk_pos).is_none()
                 && dimension.does_chunk_exist(&*world, chunk_pos)
                 && dimension.load_chunk(&*world, chunk_pos).is_some()

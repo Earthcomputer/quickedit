@@ -1,3 +1,4 @@
+use glam::IVec2;
 use serde::Deserialize;
 
 pub type ChunkPos = glam::IVec2;
@@ -343,4 +344,36 @@ impl Direction {
         let forward_transformed = transform.transform_vector3(forward);
         return Direction::from_vector(forward_transformed);
     }
+}
+
+pub fn iter_diamond(center: IVec2) -> impl Iterator<Item = IVec2> {
+    struct DiamondIter {
+        center: IVec2,
+        delta: IVec2,
+    }
+    impl Iterator for DiamondIter {
+        type Item = IVec2;
+        fn next(&mut self) -> Option<IVec2> {
+            let result = self.center + self.delta;
+            if self.delta.y == 0 && self.delta.x >= 0 {
+                self.delta.x = -self.delta.x - 1;
+            } else if self.delta.y >= 0 {
+                self.delta.x += 1;
+                self.delta.y = -self.delta.y + if self.delta.x > 0 { 1 } else { -1 };
+            } else {
+                self.delta.y = -self.delta.y;
+            }
+            return Some(result);
+        }
+    }
+    DiamondIter {
+        center,
+        delta: IVec2::ZERO,
+    }
+}
+
+pub fn iter_diamond_within_square(center: IVec2, radius: i32) -> impl Iterator<Item = IVec2> {
+    return iter_diamond(center)
+        .filter(move |pos| pos.rectangular_distance(center) <= radius)
+        .take_while(move |pos| pos.taxicab_distance(center) <= radius * 2);
 }
