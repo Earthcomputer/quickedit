@@ -11,7 +11,7 @@ use glam::{IVec2, Vec3Swizzles};
 use internment::ArcIntern;
 use positioned_io_preview::RandomAccessFile;
 use crate::fname::FName;
-use crate::geom::{BlockPos, ChunkPos};
+use crate::geom::{BlockPos, ChunkPos, IVec2RangeExtensions};
 use crate::renderer;
 use crate::renderer::WorldRenderer;
 use crate::{CommonFNames, minecraft, resources};
@@ -76,7 +76,7 @@ impl Subchunk {
     }
 
     #[profiling::function]
-    pub fn set_block_state(&self, pos: BlockPos, value: &IBlockState) {
+    fn set_block_state(&self, pos: BlockPos, value: &IBlockState) {
         self.block_data.write().unwrap().set(pos.x as usize, pos.y as usize, pos.z as usize, value);
         self.needs_redraw.store(true, Ordering::Release);
     }
@@ -87,7 +87,7 @@ impl Subchunk {
     }
 
     #[profiling::function]
-    pub fn set_biome(&self, pos: BlockPos, value: &FName) {
+    fn set_biome(&self, pos: BlockPos, value: &FName) {
         self.biome_data.write().unwrap().set(pos.x as usize >> 2, pos.y as usize >> 2, pos.z as usize >> 2, value);
         self.needs_redraw.store(true, Ordering::Release);
     }
@@ -165,6 +165,16 @@ impl Dimension {
     pub fn get_biome(&self, pos: BlockPos) -> Option<FName> {
         let chunk = self.get_chunk(pos.xz() >> glam::IVec2::new(4, 4))?;
         chunk.get_biome(self, pos & glam::IVec3::new(15, !0, 15))
+    }
+
+    pub(super) fn on_chunk_load(&self, pos: ChunkPos) {
+        for delta in (-IVec2::ONE..=IVec2::ONE).iter() {
+            if let Some(chunk) = self.get_chunk(pos + delta) {
+                for subchunk in chunk.subchunks.iter().flatten() {
+                    subchunk.needs_redraw.store(true, Ordering::Release);
+                }
+            }
+        }
     }
 }
 

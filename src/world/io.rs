@@ -45,12 +45,23 @@ impl Dimension {
         if let Some(chunk) = self.chunks.get(&pos) {
             return Some(chunk.clone());
         }
+        let mut chunk_loaded = false;
         self.chunks.entry(pos).or_try_insert_with(|| {
             match self.read_chunk(world, pos)? {
-                Some(chunk) => Ok(Arc::new(chunk)),
+                Some(chunk) => {
+                    chunk_loaded = true;
+                    Ok(Arc::new(chunk))
+                },
                 None => Err(io::Error::new(io::ErrorKind::NotFound, "Chunk not found"))
             }
-        }).map(|r| r.clone()).map_err(|err| {
+        }).map(|r| {
+            let result = r.clone();
+            drop(r);
+            if chunk_loaded {
+                self.on_chunk_load(pos);
+            }
+            result
+        }).map_err(|err| {
             if err.kind() != io::ErrorKind::NotFound {
                 eprintln!("Failed to load chunk: {}", err);
             }
