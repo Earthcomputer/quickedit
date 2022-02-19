@@ -11,6 +11,8 @@ use crate::world::{Dimension, IBlockState};
 fn get_velocity(world: &World, dimension: &Dimension, pos: BlockPos, state: &IBlockState, fluid: Fluid) -> Vec3 {
     let mut velocity = Vec3::ZERO;
 
+    let (level, falling) = get_level(state);
+
     for dir in Direction::HORIZONTAL {
         let other_state = match dimension.get_block_state(pos + dir.forward()) {
             Some(state) => state,
@@ -22,7 +24,7 @@ fn get_velocity(world: &World, dimension: &Dimension, pos: BlockPos, state: &IBl
         }
         let height = match other_fluid {
             Fluid::Empty => 0.0,
-            _ => get_level(&other_state) as f32 / 9.0,
+            _ => get_level(&other_state).0 as f32 / 9.0,
         };
         let delta_height = if height == 0.0 {
             let blocks_movement_heuristic = other_fluid != Fluid::Empty && bakery::get_baked_model(world, &other_state)
@@ -40,13 +42,13 @@ fn get_velocity(world: &World, dimension: &Dimension, pos: BlockPos, state: &IBl
             if below_fluid != fluid {
                 continue;
             }
-            let height = get_level(&below_state) as f32 / 9.0;
+            let height = get_level(&below_state).0 as f32 / 9.0;
             if height == 0.0 {
                 continue;
             }
-            get_level(state) as f32 / 9.0 - (height - 8.0 / 9.0)
+            level as f32 / 9.0 - (height - 8.0 / 9.0)
         } else {
-            get_level(state) as f32 / 9.0 - height
+            level as f32 / 9.0 - height
         };
 
         if delta_height != 0.0 {
@@ -54,9 +56,6 @@ fn get_velocity(world: &World, dimension: &Dimension, pos: BlockPos, state: &IBl
         }
     }
 
-    let falling = dimension.get_block_state(pos - BlockPos::Y)
-        .map(|s| blocks::get_fluid(&s) == fluid)
-        .unwrap_or(false);
     if falling {
         for dir in Direction::HORIZONTAL {
             let offset_pos = pos + dir.forward();
@@ -105,15 +104,15 @@ fn should_render_side(world: &World, dimension: &Dimension, fluid: Fluid, pos: B
     return neighbor_face.cull_mask != [!IVec4::ZERO, !IVec4::ZERO]
 }
 
-fn get_level(state: &IBlockState) -> u32 {
+fn get_level(state: &IBlockState) -> (u32, bool) {
     let block = &state.block;
     if block == &CommonFNames.WATER || block == &CommonFNames.FLOWING_WATER || block == &CommonFNames.LAVA || block == &CommonFNames.FLOWING_LAVA {
         state.properties.get(&CommonFNames.LEVEL)
             .and_then(fname::to_int)
-            .unwrap_or(8)
-            .clamp(0, 8)
+            .map(|level| if level == 8 { (8, true) } else { (8 - level.clamp(0, 7), false) })
+            .unwrap_or((8, false))
     } else {
-        8
+        (8, false)
     }
 }
 
@@ -134,7 +133,7 @@ fn get_north_west_fluid_height(dimension: &Dimension, pos: BlockPos, fluid: Flui
             None => continue,
         };
         if blocks::get_fluid(&state_across) == fluid {
-            let h = get_level(&state_across) as f32 / 9.0;
+            let h = get_level(&state_across).0 as f32 / 9.0;
             if h >= 0.8 {
                 height += h * 10.0;
                 total_weight += 10;
