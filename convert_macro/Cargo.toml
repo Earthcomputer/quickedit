@@ -1,0 +1,11 @@
+[package]
+name = "quickedit-convert-macro"
+version = "1.0.0"
+edition = "2018"
+
+[lib]
+proc-macro = true
+
+[dependencies]
+syn = "1.0.86"
+quote = "1.0.15"

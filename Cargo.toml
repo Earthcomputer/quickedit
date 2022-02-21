@@ -9,6 +9,7 @@ build = "build.rs"
 # See more keys and their definitions at https://doc.rust-lang.org/cargo/reference/manifest.html
 
 [dependencies]
+quickedit-convert-macro = { path = 'convert_macro' }
 ahash = { version = "0.7.6", features = ["serde"] } # for faster hash maps
 approx = "0.5.1" # for approximate float comparisons
 async-executor = "1.4.1" # simple async executor

@@ -28,6 +28,7 @@ mod resources;
 mod geom;
 mod blocks;
 mod debug;
+mod convert;
 
 use std::path::PathBuf;
 use std::sync::{Mutex, RwLock, RwLockReadGuard};
