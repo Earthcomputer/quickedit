@@ -1,5 +1,4 @@
 use std::{io, time};
-use std::collections::BTreeMap;
 use std::io::Cursor;
 use std::mem::MaybeUninit;
 use std::path::PathBuf;
@@ -9,10 +8,12 @@ use ahash::AHashMap;
 use byteorder::{BigEndian, ReadBytesExt};
 use dashmap::mapref::entry::Entry;
 use dashmap::try_result::TryResult;
+use flate2::read;
 use glam::IVec2;
 use positioned_io_preview::{RandomAccessFile, ReadAt, ReadBytesAtExt};
-use serde::{Deserialize, Serialize};
-use crate::{CommonFNames, World};
+use serde::{Deserialize, Deserializer};
+use crate::{CommonFNames, convert, World};
+use crate::convert::VersionedSerde;
 use crate::fname::FName;
 use crate::geom::ChunkPos;
 use crate::util::FastDashRefMut;
@@ -199,12 +200,20 @@ impl Dimension {
             if n > size - 5 {
                 return Err(io::Error::new(io::ErrorKind::InvalidData, format!("Declared size {} of chunk is larger than actual size {}", n, size)));
             }
-            match b {
-                1 => nbt::from_gzip_reader(cursor)?,
-                2 => nbt::from_zlib_reader(cursor)?,
-                3 => nbt::from_reader(cursor)?,
-                _ => return Err(io::Error::new(io::ErrorKind::InvalidData, "Unknown compression type")),
-            }
+            let pos = cursor.position() as usize;
+            let make_deserializer = || {
+                let cursor = Cursor::new(&buffer[pos..]);
+                let read: Box<dyn io::Read> = match b {
+                    1 => Box::new(read::GzDecoder::new(cursor)),
+                    2 => Box::new(read::ZlibDecoder::new(cursor)),
+                    3 => Box::new(cursor),
+                    _ => return Err(io::Error::new(io::ErrorKind::InvalidData, "Unknown compression type")),
+                };
+                Ok(nbt::de::Decoder::new(read))
+            };
+            let version = convert::get_version(&mut make_deserializer()?)?;
+            let result = VersionedSerde::deserialize(version, &mut make_deserializer()?)?;
+            result
         };
 
         let mut chunk = Chunk::empty();
@@ -239,77 +248,85 @@ impl Dimension {
     }
 }
 
-#[derive(Deserialize, Serialize)]
-pub(super) struct LevelDat {
-    #[serde(rename = "Data")]
-    pub(super) data: LevelDatData,
-
-    #[serde(flatten)]
-    unknown_fields: BTreeMap<String, nbt::Value>,
+pub fn get_level_dat_version<'de, D: Deserializer<'de>>(deserializer: D) -> Result<u32, D::Error> {
+    #[derive(Deserialize)]
+    struct LevelDatVersionExtractorData {
+        #[serde(rename = "DataVersion")]
+        data_version: u32,
+    }
+    #[derive(Deserialize)]
+    struct LevelDatVersionExtractor {
+        #[serde(rename = "Data")]
+        data: LevelDatVersionExtractorData,
+    }
+    let extractor = LevelDatVersionExtractor::deserialize(deserializer)?;
+    Ok(extractor.data.data_version)
 }
 
-#[derive(Deserialize, Serialize)]
-pub(super) struct LevelDatData {
-    #[serde(rename = "Version")]
-    pub(super) version: Option<LevelDatVersionInfo>,
-
-    #[serde(flatten)]
-    unknown_fields: BTreeMap<String, nbt::Value>,
+convert::variants! {
+    pub(super) struct LevelDat {
+        #[serde(rename = "Data")]
+        #[variants]
+        pub(super) data: LevelDatData,
+    }
 }
 
-#[derive(Deserialize, Serialize)]
-pub(super) struct LevelDatVersionInfo {
-    #[serde(rename = "Id")]
-    id: u32,
-    #[serde(rename = "Name")]
-    pub(super) name: String,
-
-    #[serde(flatten)]
-    unknown_fields: BTreeMap<String, nbt::Value>,
+convert::variants! {
+    pub(super) struct LevelDatData {
+        #[serde(rename = "Version")]
+        #[variants]
+        pub(super) version: Option<LevelDatVersionInfo>,
+    }
 }
 
-#[derive(Deserialize, Serialize)]
-struct SerializedChunk {
-    sections: Vec<SerializedChunkSection>,
-
-    #[serde(flatten)]
-    unknown_fields: BTreeMap<String, nbt::Value>,
+convert::variants! {
+    pub(super) struct LevelDatVersionInfo {
+        #[serde(rename = "Id")]
+        id: u32,
+        #[serde(rename = "Name")]
+        pub(super) name: String,
+    }
 }
 
-#[derive(Deserialize, Serialize)]
-struct SerializedChunkSection {
-    block_states: SerializedBlockStates,
-    biomes: SerializedBiomes,
-
-    #[serde(flatten)]
-    unknown_fields: BTreeMap<String, nbt::Value>,
+convert::variants! {
+    struct SerializedChunk {
+        #[variants]
+        sections: Vec<SerializedChunkSection>,
+    }
 }
 
-#[derive(Deserialize, Serialize)]
-struct SerializedBlockStates {
-    palette: Vec<SerializedBlockState>,
-    #[serde(default)]
-    data: Vec<i64>,
-
-    #[serde(flatten)]
-    unknown_fields: BTreeMap<String, nbt::Value>,
+convert::variants! {
+    struct SerializedChunkSection {
+        #[variants]
+        block_states: SerializedBlockStates,
+        #[variants]
+        biomes: SerializedBiomes,
+    }
 }
 
-#[derive(Deserialize, Serialize)]
-struct SerializedBlockState {
-    #[serde(rename = "Name")]
-    name: FName,
-    #[serde(default)]
-    #[serde(rename = "Properties")]
-    properties: AHashMap<FName, nbt::Value>,
+convert::variants! {
+    struct SerializedBlockStates {
+        #[variants]
+        palette: Vec<SerializedBlockState>,
+        #[serde(default)]
+        data: Vec<i64>,
+    }
 }
 
-#[derive(Deserialize, Serialize)]
-struct SerializedBiomes {
-    palette: Vec<FName>,
-    #[serde(default)]
-    data: Vec<i64>,
+convert::variants! {
+    struct SerializedBlockState {
+        #[serde(rename = "Name")]
+        name: FName,
+        #[serde(default)]
+        #[serde(rename = "Properties")]
+        properties: AHashMap<FName, nbt::Value>,
+    }
+}
 
-    #[serde(flatten)]
-    unknown_fields: BTreeMap<String, nbt::Value>,
+convert::variants! {
+    struct SerializedBiomes {
+        palette: Vec<FName>,
+        #[serde(default)]
+        data: Vec<i64>,
+    }
 }

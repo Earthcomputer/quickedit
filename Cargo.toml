@@ -9,7 +9,6 @@ build = "build.rs"
 # See more keys and their definitions at https://doc.rust-lang.org/cargo/reference/manifest.html
 
 [dependencies]
-quickedit-convert-macro = { path = 'convert_macro' }
 ahash = { version = "0.7.6", features = ["serde"] } # for faster hash maps
 approx = "0.5.1" # for approximate float comparisons
 async-executor = "1.4.1" # simple async executor
@@ -19,6 +18,7 @@ chrono = { version = "0.4.19", features = ["serde"] } # for time handling
 dashmap = "5.1.0" # for concurrent hash maps
 egui = { version = "0.16.1", default_features = false, features = ["single_threaded"] } # for GUI
 egui_glium = { version = "0.16.0", default_features = false, features = ["clipboard", "links"] } # for GUI
+flate2 = "1.0.22" # for gzip and zlib compression
 futures-lite = "1.12.0" # for basic future operations
 glam = "0.20.2" # for linear algebra
 glium = "0.31.0" # for OpenGL rendering
@@ -34,6 +34,7 @@ num_cpus = "1.13.1" # for getting number of CPUs
 path-slash = "0.1.4" # for normalizing paths
 positioned-io-preview = "0.3.3" # for random access file I/O
 profiling = "1.0.5" # for profiling
+quickedit-convert-macro = { path = 'convert_macro' } # For data conversion between Minecraft versions
 rayon = "1.5.1" # for parallel operations
 serde = { version = "1.0.133", features = ["derive"] } # for serialization
 serde_json = "1.0.74" # for JSON serialization

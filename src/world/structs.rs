@@ -7,6 +7,7 @@ use std::path::PathBuf;
 use std::sync::atomic::{AtomicBool, Ordering};
 use std::sync::{Arc, RwLock};
 use ahash::AHashMap;
+use flate2::read;
 use glam::{IVec2, Vec3Swizzles};
 use internment::ArcIntern;
 use positioned_io_preview::RandomAccessFile;
@@ -15,8 +16,9 @@ use crate::geom::{BlockPos, ChunkPos, IVec2RangeExtensions};
 use crate::renderer;
 use crate::renderer::WorldRenderer;
 use crate::{CommonFNames, minecraft, resources};
+use crate::convert::VersionedSerde;
 use crate::util::{FastDashMap, make_fast_dash_map};
-use crate::world::io::LevelDat;
+use crate::world::io::{get_level_dat_version, LevelDat};
 use crate::world::palette::{BiomeData, BlockData};
 use crate::world::workers;
 use crate::world::workers::WorldRef;
@@ -208,7 +210,8 @@ impl World {
     #[profiling::function]
     pub fn load(path: PathBuf, interaction_handler: &mut dyn minecraft::DownloadInteractionHandler) -> io::Result<WorldRef> {
         let level_dat = path.join("level.dat");
-        let level_dat: LevelDat = nbt::from_gzip_reader(File::open(level_dat)?)?;
+        let level_dat_version = get_level_dat_version(&mut nbt::de::Decoder::new(read::GzDecoder::new(File::open(&level_dat)?)))?;
+        let level_dat: LevelDat = VersionedSerde::deserialize(level_dat_version, &mut nbt::de::Decoder::new(read::GzDecoder::new(File::open(&level_dat)?)))?;
         let mc_version = level_dat.data.version.as_ref().map(|v| &v.name).unwrap_or(&minecraft::ABSENT_MINECRAFT_VERSION.to_string()).clone();
         let resources = match resources::loader::load(&mc_version, &Vec::new(), interaction_handler) {
             Some(r) => Arc::new(r),

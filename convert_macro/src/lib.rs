@@ -176,6 +176,7 @@ where
                 || segment.ident == "BTreeMap"
                 || segment.ident == "AHashMap"
                 || segment.ident == "FastDashMap"
+                || segment.ident == "Option"
             {
                 if let PathArguments::AngleBracketed(args) = &mut segment.arguments {
                     if let Some(GenericArgument::Type(ty)) = args.args.last_mut() {
@@ -210,6 +211,7 @@ pub fn variants(items: TokenStream) -> TokenStream {
         ).to_compile_error().into(),
     };
     let tokens = quote!(
+        #[serde(flatten)]
         _extra: std::collections::BTreeMap<String, nbt::Value>
     ).into();
     fields.named.push(parse_macro_input!(tokens with Field::parse_named));
@@ -249,8 +251,14 @@ pub fn variants(items: TokenStream) -> TokenStream {
         all_versions.push(current_variant);
     }
 
+    let mut actual_main = main.clone();
+    if let Fields::Named(fields) = &mut actual_main.fields {
+        for field in &mut fields.named {
+            field.attrs.retain(|attr| !attr.path.is_ident("serde") && !attr.path.is_ident("variants"));
+        }
+    }
     let mut output = quote!(
-        #main
+        #actual_main
     );
 
     let mut up_struct = main.clone();
@@ -265,6 +273,7 @@ pub fn variants(items: TokenStream) -> TokenStream {
             for field in &mut fields.named {
                 let has_variants = field.attrs.iter().any(|attr| attr.path.is_ident("variants"));
                 if has_variants {
+                    field.attrs.retain(|attr| !attr.path.is_ident("variants"));
                     if let Err(e) = change_type(&mut field.ty, |s| format!("Variant_{}_{}", s, get_versions()[index].0.replace('.', "_"))) {
                         return e.to_compile_error().into();
                     }
@@ -310,44 +319,54 @@ pub fn variants(items: TokenStream) -> TokenStream {
                     type DownResult = crate::convert::Result<Self>;
                     #down_fn
                 }
-                impl std::convert::TryFrom<#current_name> for #up_name {
-                    type Error = crate::convert::Error;
-                    fn try_from(other: #current_name) -> crate::convert::Result<Self> {
+                impl crate::convert::ConvertFrom<#current_name> for #up_name {
+                    fn convert_from(other: #current_name) -> crate::convert::Result<Self> {
                         <Self as crate::convert::Up>::up(other)
                     }
                 }
-                impl std::convert::TryFrom<#up_name> for #current_name {
-                    type Error = crate::convert::Error;
-                    fn try_from(other: #up_name) -> crate::convert::Result<Self> {
+                impl crate::convert::ConvertFrom<#up_name> for #current_name {
+                    fn convert_from(other: #up_name) -> crate::convert::Result<Self> {
                         <Self as crate::convert::Down>::down(other)
                     }
                 }
             ));
         } else {
-            let (field_idents, (field_types, up_field_types)): (Vec<Ident>, (Vec<Type>, Vec<Type>)) = match (&the_struct.fields, &up_struct.fields) {
+            let field_info: Vec<_> = match (&the_struct.fields, &up_struct.fields) {
                 (Fields::Named(fields), Fields::Named(up_fields)) =>
                     fields.named.iter().zip(&up_fields.named).map(|(field, up_field)|
                         (
                             field.ident.as_ref().unwrap().clone(),
                             (field.ty.clone(), up_field.ty.clone())
                         )
-                    ).unzip(),
+                    ).collect(),
                 _ => unreachable!(),
             };
+            let up_conversions: Vec<_> = field_info.iter().map(|(ident, (ty, up_ty))| {
+                if quote!(#ty).to_string() == quote!(#up_ty).to_string() {
+                    quote!(#ident: other.#ident)
+                } else {
+                    quote!(#ident: <#up_ty as crate::convert::ConvertFrom<#ty>>::convert_from(other.#ident)?)
+                }
+            }).collect();
+            let down_conversions: Vec<_> = field_info.iter().map(|(ident, (ty, up_ty))| {
+                if quote!(#ty).to_string() == quote!(#up_ty).to_string() {
+                    quote!(#ident: other.#ident)
+                } else {
+                    quote!(#ident: <#ty as crate::convert::ConvertFrom<#up_ty>>::convert_from(other.#ident)?)
+                }
+            }).collect();
             output.append_all(quote!(
-                impl std::convert::TryFrom<#current_name> for #up_name {
-                    type Error = crate::convert::Error;
-                    fn try_from(other: #current_name) -> crate::convert::Result<Self> {
+                impl crate::convert::ConvertFrom<#current_name> for #up_name {
+                    fn convert_from(other: #current_name) -> crate::convert::Result<Self> {
                         Ok(Self {
-                            #(#field_idents: std::convert::TryFrom::<#field_types>::try_from(other.#field_idents).map_err(|e| std::convert::Into::<crate::convert::Error>::into(e))?,)*
+                            #(#up_conversions,)*
                         })
                     }
                 }
-                impl std::convert::TryFrom<#up_name> for #current_name {
-                    type Error = crate::convert::Error;
-                    fn try_from(other: #up_name) -> crate::convert::Result<Self> {
+                impl crate::convert::ConvertFrom<#up_name> for #current_name {
+                    fn convert_from(other: #up_name) -> crate::convert::Result<Self> {
                         Ok(Self {
-                            #(#field_idents: std::convert::TryFrom::<#up_field_types>::try_from(other.#field_idents).map_err(|e| std::convert::Into::<crate::convert::Error>::into(e))?,)*
+                            #(#down_conversions,)*
                         })
                     }
                 }
@@ -368,7 +387,7 @@ pub fn variants(items: TokenStream) -> TokenStream {
             Ident::new(&format!("Variant_{}_{}", main_ident.to_string(), get_versions()[index - 1].0.replace('.', "_")), main_ident.span())
         };
         deserialize_expr = quote!(
-            #next_ident::try_from(if version >= #id {
+            #next_ident::convert_from(if version >= #id {
                 #ident::deserialize(deserializer)?
             } else {
                 #deserialize_expr
@@ -379,7 +398,7 @@ pub fn variants(items: TokenStream) -> TokenStream {
     for (name, id) in get_versions() {
         let ident = Ident::new(&format!("Variant_{}_{}", main_ident.to_string(), name.replace('.', "_")), main_ident.span());
         serialize_block.append_all(quote!(
-            let ser = #ident::try_from(ser).map_err(|e| serde::ser::Error::custom(e.msg()))?;
+            let ser = #ident::convert_from(ser).map_err(|e| serde::ser::Error::custom(e.msg()))?;
             if version >= #id {
                 return ser.serialize(serializer);
             }
@@ -396,7 +415,7 @@ pub fn variants(items: TokenStream) -> TokenStream {
             where D: serde::Deserializer<'de>
             {
                 use serde::de::Deserialize;
-                use std::convert::TryFrom;
+                use crate::convert::ConvertFrom;
                 Ok(#deserialize_expr)
             }
 
@@ -405,7 +424,7 @@ pub fn variants(items: TokenStream) -> TokenStream {
             where S: serde::Serializer
             {
                 use serde::ser::Serialize;
-                use std::convert::TryFrom;
+                use crate::convert::ConvertFrom;
                 #serialize_block
             }
         }
