@@ -1,3 +1,6 @@
+pub mod data_versions;
+pub mod registries;
+
 use std::collections::BTreeMap;
 use std::hash::{BuildHasher, Hash};
 pub use quickedit_convert_macro::*;
@@ -26,33 +29,48 @@ pub type Result<T> = std::result::Result<T, Error>;
 
 pub trait Up {
     type UpInput;
+    type UpOutput;
     type UpResult;
-    fn up(older: Self::UpInput) -> Self::UpResult;
+    fn up(older: Self::UpInput, prevailing_version: u32) -> Self::UpResult;
 }
 
 pub trait Down {
     type DownInput;
+    type DownOutput;
     type DownResult;
-    fn down(newer: Self::DownInput) -> Self::DownResult;
+    fn down(newer: Self::DownInput, prevailing_version: u32) -> Self::DownResult;
 }
 
 pub trait VersionedSerde<'de> where Self: Sized {
-    fn deserialize<D>(version: u32, deserializer: D) -> std::result::Result<Self, D::Error>
+    fn deserialize<D>(version: u32, prevailing_version: u32, deserializer: D) -> std::result::Result<Self, D::Error>
     where D: serde::Deserializer<'de>;
-    fn serialize<S>(self, version: u32, serializer: S) -> std::result::Result<S::Ok, S::Error>
+    fn serialize<S>(self, version: u32, prevailing_version: u32, serializer: S) -> std::result::Result<S::Ok, S::Error>
     where S: serde::Serializer;
 }
 
+pub trait ConvertInto<T> {
+    fn convert_into(self, prevailing_version: u32) -> Result<T>;
+}
+
+impl<T, U> ConvertInto<U> for T
+    where
+        U: ConvertFrom<T>
+{
+    fn convert_into(self, prevailing_version: u32) -> Result<U> {
+        U::convert_from(self, prevailing_version)
+    }
+}
+
 pub trait ConvertFrom<T>: Sized {
-    fn convert_from(input: T) -> Result<Self>;
+    fn convert_from(input: T, prevailing_version: u32) -> Result<Self>;
 }
 
 impl<T, U> ConvertFrom<Option<T>> for Option<U>
     where
         U: ConvertFrom<T>,
 {
-    fn convert_from(input: Option<T>) -> Result<Self> {
-        input.map(ConvertFrom::convert_from).transpose()
+    fn convert_from(input: Option<T>, prevailing_version: u32) -> Result<Self> {
+        input.map(|v| U::convert_from(v, prevailing_version)).transpose()
     }
 }
 
@@ -60,8 +78,8 @@ impl<T, U> ConvertFrom<Vec<T>> for Vec<U>
     where
         U: ConvertFrom<T>,
 {
-    fn convert_from(input: Vec<T>) -> Result<Self> {
-        input.into_iter().map(ConvertFrom::convert_from).collect()
+    fn convert_from(input: Vec<T>, prevailing_version: u32) -> Result<Self> {
+        input.into_iter().map(|v| U::convert_from(v, prevailing_version)).collect()
     }
 }
 
@@ -72,8 +90,8 @@ impl<K, T, U, S> ConvertFrom<std::collections::HashMap<K, T, S>> for std::collec
         U: ConvertFrom<T> + Eq,
         S: BuildHasher + Default,
 {
-    fn convert_from(input: std::collections::HashMap<K, T, S>) -> Result<Self> {
-        input.into_iter().map(|(k, v)| ConvertFrom::convert_from(v).map(|v| (k, v))).collect()
+    fn convert_from(input: std::collections::HashMap<K, T, S>, prevailing_version: u32) -> Result<Self> {
+        input.into_iter().map(|(k, v)| ConvertFrom::convert_from(v, prevailing_version).map(|v| (k, v))).collect()
     }
 }
 
@@ -82,8 +100,8 @@ impl<K, T, U> ConvertFrom<BTreeMap<K, T>> for BTreeMap<K, U>
         K: Ord,
         U: ConvertFrom<T>
 {
-    fn convert_from(input: BTreeMap<K, T>) -> Result<Self> {
-        input.into_iter().map(|(k, v)| ConvertFrom::convert_from(v).map(|v| (k, v))).collect()
+    fn convert_from(input: BTreeMap<K, T>, prevailing_version: u32) -> Result<Self> {
+        input.into_iter().map(|(k, v)| ConvertFrom::convert_from(v, prevailing_version).map(|v| (k, v))).collect()
     }
 }
 

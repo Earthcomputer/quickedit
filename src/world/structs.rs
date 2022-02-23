@@ -199,7 +199,7 @@ impl Camera {
 
 pub struct World {
     pub camera: RwLock<Camera>,
-    level_dat: LevelDat,
+    pub(super) level_dat: LevelDat,
     pub(super) path: PathBuf,
     pub resources: Arc<resources::Resources>,
     pub renderer: WorldRenderer,
@@ -211,8 +211,8 @@ impl World {
     pub fn load(path: PathBuf, interaction_handler: &mut dyn minecraft::DownloadInteractionHandler) -> io::Result<WorldRef> {
         let level_dat = path.join("level.dat");
         let level_dat_version = get_level_dat_version(&mut nbt::de::Decoder::new(read::GzDecoder::new(File::open(&level_dat)?)))?;
-        let level_dat: LevelDat = VersionedSerde::deserialize(level_dat_version, &mut nbt::de::Decoder::new(read::GzDecoder::new(File::open(&level_dat)?)))?;
-        let mc_version = level_dat.data.version.as_ref().map(|v| &v.name).unwrap_or(&minecraft::ABSENT_MINECRAFT_VERSION.to_string()).clone();
+        let level_dat: LevelDat = VersionedSerde::deserialize(level_dat_version, level_dat_version, &mut nbt::de::Decoder::new(read::GzDecoder::new(File::open(&level_dat)?)))?;
+        let mc_version = level_dat.data.version.name.clone();
         let resources = match resources::loader::load(&mc_version, &Vec::new(), interaction_handler) {
             Some(r) => Arc::new(r),
             None => return Err(io::Error::new(io::ErrorKind::Other, "Failed to load resources")),

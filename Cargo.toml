@@ -13,6 +13,7 @@ ahash = { version = "0.7.6", features = ["serde"] } # for faster hash maps
 approx = "0.5.1" # for approximate float comparisons
 async-executor = "1.4.1" # simple async executor
 attohttpc = "0.18.0" # simple HTTP client
+bimap = "0.6.2" # for utility
 byteorder = "1.4.3" # for reading and writing integers
 chrono = { version = "0.4.19", features = ["serde"] } # for time handling
 dashmap = "5.1.0" # for concurrent hash maps
@@ -34,7 +35,7 @@ num_cpus = "1.13.1" # for getting number of CPUs
 path-slash = "0.1.4" # for normalizing paths
 positioned-io-preview = "0.3.3" # for random access file I/O
 profiling = "1.0.5" # for profiling
-quickedit-convert-macro = { path = 'convert_macro' } # For data conversion between Minecraft versions
+quickedit-convert-macro = { path = 'convert_macro' } # for data conversion between Minecraft versions
 rayon = "1.5.1" # for parallel operations
 serde = { version = "1.0.133", features = ["derive"] } # for serialization
 serde_json = "1.0.74" # for JSON serialization

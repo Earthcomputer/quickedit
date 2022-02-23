@@ -138,6 +138,22 @@ macro_rules! make_a_hash_set {
     };
 }
 
+#[allow(clippy::disallowed_types)]
+pub type ABiMap<K, V> = bimap::BiHashMap<K, V, ahash::RandomState, ahash::RandomState>;
+
+#[macro_export]
+macro_rules! make_a_bi_map {
+    ($($k:expr => $v: expr),* $(,)?) => {
+        {
+            let mut map = ABiMap::default();
+            $(
+                map.insert($k, $v);
+            )*
+            map
+        }
+    };
+}
+
 pub fn is_dir(path: &Path) -> bool {
     if path.is_dir() {
         return true;

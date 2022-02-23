@@ -13,12 +13,13 @@ use glam::IVec2;
 use positioned_io_preview::{RandomAccessFile, ReadAt, ReadBytesAtExt};
 use serde::{Deserialize, Deserializer};
 use crate::{CommonFNames, convert, World};
-use crate::convert::VersionedSerde;
+use crate::convert::{ConvertInto, VersionedSerde};
 use crate::fname::FName;
 use crate::geom::ChunkPos;
 use crate::util::FastDashRefMut;
-use crate::world::{BlockState, Chunk, Dimension, IBlockState, Subchunk};
+use crate::world::{BlockState, Chunk, Dimension, IBlockState, Subchunk, versioned_io};
 use crate::world::palette::{BiomeData, BlockData};
+use crate::world::versioned_io::*;
 
 impl Dimension {
     fn get_save_dir(&self, world: &World) -> PathBuf {
@@ -212,7 +213,10 @@ impl Dimension {
                 Ok(nbt::de::Decoder::new(read))
             };
             let version = convert::get_version(&mut make_deserializer()?)?;
-            let result = VersionedSerde::deserialize(version, &mut make_deserializer()?)?;
+            versioned_io::CURRENT_DIMENSION.with(|cur_dim| {
+                cur_dim.replace(self.id.clone());
+            });
+            let result = VersionedSerde::deserialize(version, world.level_dat.data.version.id, &mut make_deserializer()?)?;
             result
         };
 
@@ -275,7 +279,7 @@ convert::variants! {
     pub(super) struct LevelDatData {
         #[serde(rename = "Version")]
         #[variants]
-        pub(super) version: Option<LevelDatVersionInfo>,
+        pub(super) version: LevelDatVersionInfo,
     }
 }
 
@@ -293,19 +297,77 @@ convert::variants! {
         #[variants]
         sections: Vec<SerializedChunkSection>,
     }
-}
-
-convert::variants! {
-    struct SerializedChunkSection {
+    #[variants(SerializedChunkSection, SerializedBlockStates, SerializedBiomes)]
+    fn up(older: Self::UpInput, prevailing_version: u32) -> Self::UpResult {
+        let biomes = biomes_17_up(&older.level.biomes, prevailing_version)?;
+        Ok(
+            Self::UpOutput {
+                sections: older.level.sections.into_iter().zip(biomes).map(|(sec, biomes)| {
+                    let result: convert::Result<SerializedChunkSection> = try {
+                        SerializedChunkSection {
+                            block_states: SerializedBlockStates {
+                                palette: sec.palette.map(|p| p.convert_into(prevailing_version)).transpose()?.unwrap_or_else(|| {
+                                    vec![Variant_SerializedBlockState_1_18 {
+                                        name: CommonFNames.AIR.clone(),
+                                        properties: Default::default(),
+                                        _extra: Default::default(),
+                                    }]
+                                }),
+                                data: sec.block_states,
+                                _extra: Default::default(),
+                            },
+                            biomes,
+                            _extra: sec._extra,
+                        }
+                    };
+                    result
+                }).collect::<Result<_, _>>()?,
+                _extra: older._extra,
+            }
+        )
+    }
+    #[variants(SerializedChunkLevel, SerializedChunkSection17)]
+    fn down(newer: Self::DownInput, prevailing_version: u32) -> Self::DownResult {
+        let biomes = biomes_17_down(&newer.sections, prevailing_version)?;
+        let sections = newer.sections.into_iter().map(|sec| {
+            let result: convert::Result<SerializedChunkSection17> = try {
+                SerializedChunkSection17 {
+                    palette: Some(sec.block_states.palette.convert_into(prevailing_version)?),
+                    block_states: sec.block_states.data,
+                    _extra: sec._extra,
+                }
+            };
+            result
+        }).collect::<Result<_, _>>()?;
+        Ok(
+            Self::DownOutput {
+                level: SerializedChunkLevel {
+                    sections,
+                    biomes,
+                    _extra: Default::default(),
+                },
+                _extra: newer._extra,
+            }
+        )
+    }
+    1,17,1 => {
+        #[serde(rename = "Level")]
         #[variants]
-        block_states: SerializedBlockStates,
-        #[variants]
-        biomes: SerializedBiomes,
+        level: SerializedChunkLevel,
     }
 }
 
 convert::variants! {
-    struct SerializedBlockStates {
+    pub(super) struct SerializedChunkSection {
+        #[variants]
+        block_states: SerializedBlockStates,
+        #[variants]
+        pub(super) biomes: SerializedBiomes,
+    }
+}
+
+convert::variants! {
+    pub(super) struct SerializedBlockStates {
         #[variants]
         palette: Vec<SerializedBlockState>,
         #[serde(default)]
@@ -314,7 +376,8 @@ convert::variants! {
 }
 
 convert::variants! {
-    struct SerializedBlockState {
+    pub(super) struct SerializedBlockState {
+        #[registry(block)]
         #[serde(rename = "Name")]
         name: FName,
         #[serde(default)]
@@ -324,9 +387,11 @@ convert::variants! {
 }
 
 convert::variants! {
-    struct SerializedBiomes {
-        palette: Vec<FName>,
+    #[derive(Clone)]
+    pub(super) struct SerializedBiomes {
+        #[registry(biome)]
+        pub(super) palette: Vec<FName>,
         #[serde(default)]
-        data: Vec<i64>,
+        pub(super) data: Vec<i64>,
     }
 }

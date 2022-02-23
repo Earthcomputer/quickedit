@@ -2,5 +2,6 @@ disallowed-methods = [
     "dashmap::DashMap::new"
 ]
 disallowed-types = [
+    "bimap::BiHashMap",
     "std::collections::HashMap"
 ]

@@ -5,9 +5,11 @@
 #![feature(explicit_generic_args_with_impl_trait)]
 #![feature(int_log)]
 #![feature(int_roundings)]
+#![feature(map_try_insert)]
 #![feature(once_cell)]
 #![feature(option_result_contains)]
 #![feature(read_buf)]
+#![feature(try_blocks)]
 #![feature(try_find)]
 
 // These two lines are just to trick intellij-rust into highlighting functions with profiling::function.

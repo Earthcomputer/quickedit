@@ -6,6 +6,7 @@ use workers::WorldRef;
 mod io;
 mod palette;
 mod structs;
+mod versioned_io;
 pub mod workers;
 
 lazy_static! {

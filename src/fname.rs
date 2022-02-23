@@ -79,6 +79,10 @@ common_fnames! {
     SNOWY = "snowy";
     WATERLOGGED = "waterlogged";
 
+    // common biomes
+    OCEAN = "ocean";
+    PLAINS = "plains";
+
     // textures
     MISSINGNO = "missingno";
     WATER_STILL = "block/water_still";
