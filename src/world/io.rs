@@ -300,28 +300,30 @@ convert::variants! {
     #[variants(SerializedChunkSection, SerializedBlockStates, SerializedBiomes)]
     fn up(older: Self::UpInput, prevailing_version: u32) -> Self::UpResult {
         let biomes = biomes_17_up(&older.level.biomes, prevailing_version)?;
+        let sections = fix_17_sections(older.level.sections, prevailing_version)?;
+        let sections = sections.into_iter().zip(biomes).map(|(sec, biomes)| {
+            let result: convert::Result<SerializedChunkSection> = try {
+                SerializedChunkSection {
+                    block_states: SerializedBlockStates {
+                        palette: sec.palette.map(|p| p.convert_into(prevailing_version)).transpose()?.unwrap_or_else(|| {
+                            vec![Variant_SerializedBlockState_1_18 {
+                                name: CommonFNames.AIR.clone(),
+                                properties: Default::default(),
+                                _extra: Default::default(),
+                            }]
+                        }),
+                        data: sec.block_states,
+                        _extra: Default::default(),
+                    },
+                    biomes,
+                    _extra: sec._extra,
+                }
+            };
+            result
+        }).collect::<Result<_, _>>()?;
         Ok(
             Self::UpOutput {
-                sections: older.level.sections.into_iter().zip(biomes).map(|(sec, biomes)| {
-                    let result: convert::Result<SerializedChunkSection> = try {
-                        SerializedChunkSection {
-                            block_states: SerializedBlockStates {
-                                palette: sec.palette.map(|p| p.convert_into(prevailing_version)).transpose()?.unwrap_or_else(|| {
-                                    vec![Variant_SerializedBlockState_1_18 {
-                                        name: CommonFNames.AIR.clone(),
-                                        properties: Default::default(),
-                                        _extra: Default::default(),
-                                    }]
-                                }),
-                                data: sec.block_states,
-                                _extra: Default::default(),
-                            },
-                            biomes,
-                            _extra: sec._extra,
-                        }
-                    };
-                    result
-                }).collect::<Result<_, _>>()?,
+                sections,
                 _extra: older._extra,
             }
         )
@@ -334,6 +336,7 @@ convert::variants! {
                 SerializedChunkSection17 {
                     palette: Some(sec.block_states.palette.convert_into(prevailing_version)?),
                     block_states: sec.block_states.data,
+                    y: 0,
                     _extra: sec._extra,
                 }
             };

@@ -133,7 +133,38 @@ convert::variants! {
         #[serde(rename = "BlockStates")]
         #[serde(default)]
         pub(super) block_states: Vec<i64>,
+
+        #[serde(rename = "Y")]
+        pub(super) y: i32,
     }
+}
+
+pub(super) fn fix_17_sections(sections: Vec<Variant_SerializedChunkSection17_1_17_1>, prevailing_version: u32) -> convert::Result<Vec<Variant_SerializedChunkSection17_1_17_1>> {
+    let cur_dim = CURRENT_DIMENSION.with(|c| c.borrow().clone());
+    let will_be_shifted = cur_dim == CommonFNames.OVERWORLD && prevailing_version > data_versions::V1_17_1;
+    let perform_shift = will_be_shifted && sections.len() == 16;
+    let num_sections = if will_be_shifted { 24 } else { 16 };
+    let mut new_sections = Vec::with_capacity(num_sections);
+    for _ in 0..num_sections {
+        new_sections.push(None);
+    }
+    for section in sections {
+        let y = section.y - if perform_shift { 4 } else { 0 };
+        if y < if will_be_shifted { -4 } else { 0 } || y >= num_sections as i32 {
+            continue;
+        }
+        if new_sections[(y + if will_be_shifted { 4 } else { 0 }) as usize].replace(section).is_some() {
+            return Err(convert::Error::new(format!("Duplicate section y: {}", y)));
+        }
+    }
+    Ok(new_sections.into_iter().map(|o| o.unwrap_or_else(|| {
+        Variant_SerializedChunkSection17_1_17_1 {
+            palette: None,
+            block_states: Vec::new(),
+            y: 0,
+            _extra: Default::default(),
+        }
+    })).collect())
 }
 
 pub(super) fn biomes_17_up(biomes: &[i32], prevailing_version: u32) -> convert::Result<Vec<Variant_SerializedBiomes_1_18>> {

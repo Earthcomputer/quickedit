@@ -16,7 +16,7 @@ use crate::geom::{BlockPos, ChunkPos, IVec2RangeExtensions};
 use crate::renderer;
 use crate::renderer::WorldRenderer;
 use crate::{CommonFNames, minecraft, resources};
-use crate::convert::VersionedSerde;
+use crate::convert::{data_versions, VersionedSerde};
 use crate::util::{FastDashMap, make_fast_dash_map};
 use crate::world::io::{get_level_dat_version, LevelDat};
 use crate::world::palette::{BiomeData, BlockData};
@@ -232,8 +232,10 @@ impl World {
             dimensions: make_fast_dash_map()
         };
         let mut overworld = Dimension::new(CommonFNames.OVERWORLD.clone());
-        overworld.min_y = -64;
-        overworld.max_y = 383;
+        if level_dat_version > data_versions::V1_17_1 {
+            overworld.min_y = -64;
+            overworld.max_y = 383;
+        }
         world.dimensions.insert(CommonFNames.OVERWORLD.clone(), Arc::new(overworld));
         world.dimensions.insert(CommonFNames.THE_NETHER.clone(), Arc::new(Dimension::new(CommonFNames.THE_NETHER.clone())));
         world.dimensions.insert(CommonFNames.THE_END.clone(), Arc::new(Dimension::new(CommonFNames.THE_END.clone())));
