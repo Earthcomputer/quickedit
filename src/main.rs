@@ -152,7 +152,7 @@ fn main() {
     }
     gl::load_with(|s| display.gl_window().get_proc_address(s) as *const _);
 
-    if let Some(world_folder) = get_cmd_line_args().world.as_ref().map(|p| p.clone()).or_else(|| get_config().auto_open_world.clone()) {
+    if let Some(world_folder) = get_cmd_line_args().world.as_ref().cloned().or_else(|| get_config().auto_open_world.clone()) {
         struct CmdLineInteractionHandler;
         impl minecraft::DownloadInteractionHandler for CmdLineInteractionHandler {
             fn show_download_prompt(&mut self, mc_version: &str) -> bool {
