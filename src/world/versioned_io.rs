@@ -104,13 +104,13 @@ lazy_static! {
     );
 }
 
-fn get_biome_name(id: i32, prevailing_version: u32) -> Option<&'static FName> {
+fn get_biome_name(id: i32, prevailing_version: u32) -> Option<FName> {
     BIOME_IDS_17.get_by_left(&id)
         .map(|name| registries::rename_biome(name, data_versions::V1_17_1, prevailing_version))
 }
 
 fn get_biome_id(name: &FName, prevailing_version: u32) -> Option<i32> {
-    BIOME_IDS_17.get_by_right(registries::rename_biome(name, prevailing_version, data_versions::V1_17_1)).cloned()
+    BIOME_IDS_17.get_by_right(&registries::rename_biome(name, prevailing_version, data_versions::V1_17_1)).cloned()
 }
 
 convert::variants! {
@@ -120,6 +120,7 @@ convert::variants! {
         pub(super) sections: Vec<SerializedChunkSection17>,
 
         #[serde(rename = "Biomes")]
+        #[serde(default)]
         pub(super) biomes: Vec<i32>,
     }
 }
@@ -205,7 +206,7 @@ fn biomes_17_up_subchunk(getter: impl Fn(usize) -> i32, prevailing_version: u32)
     for i in 0..64 {
         let biome_id = getter(i);
         if inv_palette.try_insert(biome_id, palette.len()).is_ok() {
-            palette.push(get_biome_name(biome_id, prevailing_version).ok_or_else(|| convert::Error::new("Encountered unknown biome ID"))?.clone());
+            palette.push(get_biome_name(biome_id, prevailing_version).ok_or_else(|| convert::Error::new("Encountered unknown biome ID"))?);
         }
     }
 

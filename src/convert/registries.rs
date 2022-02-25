@@ -1,22 +1,56 @@
+use std::hash::Hash;
 use ahash::AHashMap;
 use lazy_static::lazy_static;
-use crate::fname;
+use crate::convert::data_versions::*;
+use crate::{CommonFNames, fname};
 use crate::fname::FName;
+use crate::util;
+use crate::world::{IBlockState, IBlockStateExtensions};
 
-#[derive(Debug, Default)]
-struct Entry {
+trait Rename<T> {
+    fn rename(&self, value: &T) -> T;
+}
+
+impl<T: Eq + Hash + Clone> Rename<T> for AHashMap<T, T> {
+    fn rename(&self, value: &T) -> T {
+        self.get(value).unwrap_or(value).clone()
+    }
+}
+
+impl<T: Clone> Rename<T> for Box<dyn (Fn(&T) -> T) + Sync + Send> {
+    fn rename(&self, value: &T) -> T {
+        self(value)
+    }
+}
+
+#[derive(Debug)]
+struct Entry<R: Rename<T> = AHashMap<FName, FName>, T: Clone = FName> {
     down_version: u32,
-    up_renames: AHashMap<FName, FName>,
-    down_renames: AHashMap<FName, FName>,
+    up_renames: R,
+    down_renames: R,
+    _phantom: std::marker::PhantomData<T>,
 }
 
-#[derive(Debug, Default)]
-struct Table {
-    table: Vec<Entry>,
+impl<R: Rename<T> + Default, T: Clone> Default for Entry<R, T> {
+    fn default() -> Self {
+        Entry { down_version: 0, up_renames: R::default(), down_renames: R::default(), _phantom: std::marker::PhantomData }
+    }
 }
 
-impl Table {
-    fn translate<'a, 'b: 'a>(&'b self, mut name: &'a FName, from_version: u32, to_version: u32) -> &'a FName {
+#[derive(Debug)]
+struct Table<R: Rename<T> = AHashMap<FName, FName>, T: Clone = FName> {
+    table: Vec<Entry<R, T>>,
+}
+
+impl<R: Rename<T>, T: Clone> Default for Table<R, T> {
+    fn default() -> Self {
+        Table { table: Vec::new() }
+    }
+}
+
+impl<R: Rename<T>, T: Clone> Table<R, T> {
+    fn translate(&self, name: &T, from_version: u32, to_version: u32) -> T {
+        let mut name = name.clone();
         if from_version == to_version {
             return name;
         }
@@ -26,12 +60,12 @@ impl Table {
         };
         if from_version > to_version {
             while index > 0 && self.table[index - 1].down_version >= to_version {
-                name = self.table[index - 1].down_renames.get(name).unwrap_or(name);
+                name = self.table[index - 1].down_renames.rename(&name);
                 index -= 1;
             }
         } else {
             while index < self.table.len() && self.table[index].down_version < to_version {
-                name = self.table[index].up_renames.get(name).unwrap_or(name);
+                name = self.table[index].up_renames.rename(&name);
                 index += 1;
             }
         }
@@ -44,7 +78,10 @@ macro_rules! make_table {
         {
             let mut table = Table::default();
             $(
-                let mut entry = Entry::default();
+                let mut entry: Entry<AHashMap<FName, FName>, FName> = Entry {
+                    down_version: $version,
+                    ..Default::default()
+                };
                 $(
                     let down_name = fname::from_str($down_name);
                     let up_name = fname::from_str($up_name);
@@ -60,6 +97,19 @@ macro_rules! make_table {
 }
 
 lazy_static! {
+    static ref BLOCK_RENAMES: Table = make_table! {
+        V1_16_5 => {
+            "grass_path" => "dirt_path",
+            "cauldron" => "water_cauldron",
+        }
+    };
+
+    static ref ITEM_RENAMES: Table = make_table! {
+        V1_16_5 => {
+            "grass_path" => "dirt_path",
+        }
+    };
+
     static ref BIOME_RENAMES: Table = make_table! {
         V1_17_1 => {
             "badlands_plateau" => "badlands",
@@ -102,8 +152,88 @@ lazy_static! {
             "snowcapped_peaks" => "frozen_peaks",
         }
     };
+
+    static ref BLOCK_STATE_RENAMES: Table<Box<dyn (Fn(&IBlockState) -> IBlockState) + Sync + Send>, IBlockState> = {
+        macro_rules! make_state_table {
+            ($($version:expr, $up_fn:ident, $down_fn:ident);*$(;)*) => {
+                {
+                    let mut table: Table<Box<dyn (Fn(&IBlockState) -> IBlockState) + Sync + Send>, IBlockState> = Table::default();
+                    $(
+                        table.table.push(Entry {
+                            down_version: $version,
+                            up_renames: Box::new($up_fn as fn(&IBlockState) -> IBlockState),
+                            down_renames: Box::new($down_fn as fn(&IBlockState) -> IBlockState),
+                            _phantom: std::marker::PhantomData,
+                        });
+                    )*
+                    table
+                }
+            }
+        }
+
+        let mut table = make_state_table! {
+            V1_16_5, state_upgrade_16_5, state_downgrade_16_5;
+        };
+
+        table.table.sort_by_key(|entry| entry.down_version);
+
+        for block_rename in &BLOCK_RENAMES.table {
+            let existing_index = table.table.binary_search_by_key(&block_rename.down_version, |entry| entry.down_version);
+            match existing_index {
+                Ok(index) => {
+                    let entry: &mut Entry<_, _> = &mut table.table[index];
+                    util::box_compute(&mut entry.down_renames, |existing_fn| {
+                        Box::new(move |state| {
+                            let state = existing_fn(state);
+                            state.with_block(block_rename.down_renames.rename(&state.block))
+                        })
+                    });
+                    util::box_compute(&mut entry.up_renames, |existing_fn| {
+                        Box::new(move |state| {
+                            let state = state.with_block(block_rename.up_renames.rename(&state.block));
+                            existing_fn(&state)
+                        })
+                    });
+                }
+                Err(index) => {
+                    table.table.insert(index, Entry {
+                        down_version: block_rename.down_version,
+                        up_renames: Box::new(move |state| {
+                            state.with_block(block_rename.up_renames.rename(&state.block))
+                        }),
+                        down_renames: Box::new(move |state| {
+                            state.with_block(block_rename.down_renames.rename(&state.block))
+                        }),
+                        _phantom: std::marker::PhantomData,
+                    });
+                }
+            }
+        }
+        table
+    };
 }
 
-pub fn rename_biome(name: &FName, from_version: u32, to_version: u32) -> &FName {
+pub fn rename_block(name: &FName, from_version: u32, to_version: u32) -> FName {
+    BLOCK_RENAMES.translate(name, from_version, to_version)
+}
+
+pub fn rename_item(name: &FName, from_version: u32, to_version: u32) -> FName {
+    ITEM_RENAMES.translate(name, from_version, to_version)
+}
+
+pub fn rename_biome(name: &FName, from_version: u32, to_version: u32) -> FName {
     BIOME_RENAMES.translate(name, from_version, to_version)
+}
+
+fn state_upgrade_16_5(state: &IBlockState) -> IBlockState {
+    // cauldron was renamed to water_cauldron, rename back to cauldron if level is zero
+    if state.block == CommonFNames.WATER_CAULDRON && state.properties.get(&CommonFNames.LEVEL).unwrap_or(&CommonFNames.ZERO) == &CommonFNames.ZERO {
+        state.with_block(CommonFNames.CAULDRON.clone())
+    } else {
+        state.clone()
+    }
+}
+
+fn state_downgrade_16_5(state: &IBlockState) -> IBlockState {
+    state.clone()
 }

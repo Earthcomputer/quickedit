@@ -2,6 +2,7 @@ use std::any::Any;
 use std::fmt;
 use std::fmt::Formatter;
 use std::hash::Hash;
+use std::mem::MaybeUninit;
 use std::ops::{Deref, DerefMut};
 use std::path::{Path, PathBuf};
 use std::str::FromStr;
@@ -333,6 +334,15 @@ where
 #[inline]
 pub unsafe fn extend_lifetime<T>(t: &T) -> &'static T {
     std::mem::transmute(t)
+}
+
+pub fn box_compute<T: ?Sized>(bx: &mut Box<T>, f: impl FnOnce(Box<T>) -> Box<T>) {
+    let mut other = MaybeUninit::uninit();
+    unsafe {
+        std::mem::swap(&mut *other.as_mut_ptr(), bx);
+        let other = other.assume_init();
+        *bx = f(other);
+    }
 }
 
 lazy_static! {

@@ -115,7 +115,9 @@ impl Dimension {
                 Ok(0) => Ok(false),
                 Ok(_) => Ok(true),
                 Err(e) => {
-                    eprintln!("Error checking existence of chunk: {}", e);
+                    if e.kind() != io::ErrorKind::UnexpectedEof {
+                        eprintln!("Error checking existence of chunk: {}", e);
+                    }
                     Ok(false)
                 }
             }
@@ -166,9 +168,11 @@ impl Dimension {
             };
             let raf = &region_file_cache_entry.0;
 
-            #[allow(clippy::uninit_assumed_init)]
-                let mut sector_data: [u8; 4] = unsafe { MaybeUninit::uninit().assume_init() };
-            raf.read_exact_at((((pos.x & 31) | ((pos.y & 31) << 5)) << 2) as u64, &mut sector_data)?;
+            let mut sector_data: MaybeUninit<[u8; 4]> = MaybeUninit::uninit();
+            let sector_data = unsafe {
+                raf.read_exact_at((((pos.x & 31) | ((pos.y & 31) << 5)) << 2) as u64, &mut *sector_data.as_mut_ptr())?;
+                sector_data.assume_init()
+            };
             if sector_data == [0, 0, 0, 0] {
                 return Ok(None);
             }
@@ -179,7 +183,7 @@ impl Dimension {
             }
             let mut buffer = Vec::with_capacity(size);
             #[allow(clippy::uninit_vec)]
-                unsafe { buffer.set_len(size); }
+            unsafe { buffer.set_len(size); }
             raf.read_exact_at(offset, &mut buffer)?;
             let mut cursor = Cursor::new(&buffer);
             let m = cursor.read_i32::<BigEndian>()?;
@@ -201,9 +205,9 @@ impl Dimension {
             if n > size - 5 {
                 return Err(io::Error::new(io::ErrorKind::InvalidData, format!("Declared size {} of chunk is larger than actual size {}", n, size)));
             }
-            let pos = cursor.position() as usize;
+            let cursor_pos = cursor.position() as usize;
             let make_deserializer = || {
-                let cursor = Cursor::new(&buffer[pos..]);
+                let cursor = Cursor::new(&buffer[cursor_pos..]);
                 let read: Box<dyn io::Read> = match b {
                     1 => Box::new(read::GzDecoder::new(cursor)),
                     2 => Box::new(read::ZlibDecoder::new(cursor)),
@@ -212,6 +216,16 @@ impl Dimension {
                 };
                 Ok(nbt::de::Decoder::new(read))
             };
+            #[cfg(feature = "debug-chunk-deserialization")]
+            {
+                if let Some(chunk_pos) = &crate::get_cmd_line_args().debug_chunk_deserialization {
+                    let coords: Vec<i32> = chunk_pos.split(',').map(|s| s.parse().unwrap()).collect();
+                    if pos.x == coords[0] && pos.y == coords[1] {
+                        use std::io::Write;
+                        std::fs::File::create("debug-chunk-deserialization.nbt").unwrap().write_all(&buffer[cursor_pos..]).unwrap();
+                    }
+                }
+            }
             let version = convert::get_version(&mut make_deserializer()?)?;
             versioned_io::CURRENT_DIMENSION.with(|cur_dim| {
                 cur_dim.replace(self.id.clone());
@@ -299,6 +313,7 @@ convert::variants! {
     }
     #[variants(SerializedChunkSection, SerializedBlockStates, SerializedBiomes)]
     fn up(older: Self::UpInput, prevailing_version: u32) -> Self::UpResult {
+        // TODO: there's definitely more to do here
         let biomes = biomes_17_up(&older.level.biomes, prevailing_version)?;
         let sections = fix_17_sections(older.level.sections, prevailing_version)?;
         let sections = sections.into_iter().zip(biomes).map(|(sec, biomes)| {

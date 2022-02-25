@@ -51,6 +51,8 @@ zip = "0.5.13" # for reading ZIP files
 tracy-client-sys = { git = "https://github.com/Earthcomputer/rust_tracy_client" }
 
 [features]
+debug-atlas = []
+debug-chunk-deserialization = []
 profile-with-tracy = ["tracy-client", "tracy-client-sys", "profiling/profile-with-tracy"]
 
 [build-dependencies]

@@ -1,5 +1,6 @@
 use std::collections::hash_map::DefaultHasher;
 use std::{fmt, io, time};
+use std::borrow::Borrow;
 use std::fmt::Formatter;
 use std::fs::File;
 use std::hash::{Hash, Hasher};
@@ -55,6 +56,32 @@ impl Hash for BlockState {
 }
 
 pub type IBlockState = ArcIntern<BlockState>;
+
+pub trait IBlockStateExtensions {
+    fn with_block(&self, block: FName) -> Self;
+    fn with_property(&self, key: FName, value: FName) -> Self;
+    fn remove_property<Q: ?Sized + Eq + Hash>(&self, key: &Q) -> Self where FName: Borrow<Q>;
+}
+
+impl IBlockStateExtensions for IBlockState {
+    fn with_block(&self, block: FName) -> Self {
+        let mut state = (**self).clone();
+        state.block = block;
+        IBlockState::new(state)
+    }
+
+    fn with_property(&self, key: FName, value: FName) -> Self {
+        let mut state = (**self).clone();
+        state.properties.insert(key, value);
+        IBlockState::new(state)
+    }
+
+    fn remove_property<Q: ?Sized + Eq + Hash>(&self, key: &Q) -> Self where FName: Borrow<Q> {
+        let mut state = (**self).clone();
+        state.properties.remove(key);
+        IBlockState::new(state)
+    }
+}
 
 impl BlockState {
     pub fn new(block: &FName) -> Self {

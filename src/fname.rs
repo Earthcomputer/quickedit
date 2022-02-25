@@ -62,6 +62,8 @@ common_fnames! {
     GRAVEL = "gravel";
     ICE = "ice";
     FROSTED_ICE = "frosted_ice";
+    CAULDRON = "cauldron";
+    WATER_CAULDRON = "water_cauldron";
 
     // common states
     HALF = "half";

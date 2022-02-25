@@ -219,6 +219,11 @@ pub(super) fn stitch<P: image::Pixel<Subpixel=u8> + 'static, I: image::GenericIm
         }
     }).collect();
 
+    #[cfg(feature = "debug_atlas")]
+    {
+        atlas.save_with_format("atlas.png", image::ImageFormat::PNG).unwrap();
+    }
+
     Some(TextureAtlas {
         width,
         height,

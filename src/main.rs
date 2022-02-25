@@ -36,6 +36,7 @@ use std::path::PathBuf;
 use std::sync::{Mutex, RwLock, RwLockReadGuard};
 use std::{thread, time};
 use std::collections::vec_deque::VecDeque;
+use std::lazy::SyncOnceCell;
 use egui::{FontData, FontDefinitions, FontFamily};
 use glium::{glutin::{dpi, event, event_loop, window, ContextBuilder}, Display};
 use glium::Surface;
@@ -54,11 +55,15 @@ mod gl {
     include!(concat!(env!("OUT_DIR"), "/gl_bindings.rs"));
 }
 
-#[derive(StructOpt)]
+#[derive(Debug, StructOpt)]
 #[structopt(name = "quickedit", about = "A Minecraft world editor")]
-struct CmdLineArgs {
+pub struct CmdLineArgs {
     #[structopt(short = "w", long = "world")]
     world: Option<PathBuf>,
+
+    #[cfg(feature = "debug-chunk-deserialization")]
+    #[structopt(long = "debug-chunk-deserialization")]
+    pub debug_chunk_deserialization: Option<String>,
 }
 
 const FONT_DATA: &[u8] = include_bytes!("../res/MinecraftRegular-Bmg3.ttf");
@@ -124,7 +129,7 @@ fn create_display(event_loop: &event_loop::EventLoop<()>) -> glium::Display {
 fn main() {
     profiling::register_thread!("main");
 
-    let args: CmdLineArgs = CmdLineArgs::from_args();
+    CMD_LINE_ARGS.set(CmdLineArgs::from_args()).unwrap();
 
     let event_loop = event_loop::EventLoop::with_user_event();
     let display = create_display(&event_loop);
@@ -147,7 +152,7 @@ fn main() {
     }
     gl::load_with(|s| display.gl_window().get_proc_address(s) as *const _);
 
-    if let Some(world_folder) = args.world.or_else(|| get_config().auto_open_world.clone()) {
+    if let Some(world_folder) = get_cmd_line_args().world.as_ref().map(|p| p.clone()).or_else(|| get_config().auto_open_world.clone()) {
         struct CmdLineInteractionHandler;
         impl minecraft::DownloadInteractionHandler for CmdLineInteractionHandler {
             fn show_download_prompt(&mut self, mc_version: &str) -> bool {
@@ -287,6 +292,12 @@ lazy_static! {
             },
         })
     };
+}
+
+static CMD_LINE_ARGS: SyncOnceCell<CmdLineArgs> = SyncOnceCell::new();
+
+pub fn get_cmd_line_args() -> &'static CmdLineArgs {
+    CMD_LINE_ARGS.get().unwrap()
 }
 
 pub fn get_config() -> RwLockReadGuard<'static, Config> {
