@@ -73,7 +73,9 @@ fn get_grass_color_with_default(world: &World, dimension: &Dimension, pos: Block
     let biome = dimension.get_biome(pos);
     if let Some(biome) = &biome {
         if let Some(tint_data) = world.resources.get_tint_data(biome) {
-            return tint_data.grass;
+            if let Some(color) = tint_data.grass {
+                return color;
+            }
         }
     }
 
@@ -100,7 +102,9 @@ fn get_foliage_color(world: &World, dimension: &Dimension, pos: BlockPos, _state
     let biome = dimension.get_biome(pos);
     if let Some(biome) = &biome {
         if let Some(tint_data) = world.resources.get_tint_data(biome) {
-            return tint_data.foliage;
+            if let Some(color) = tint_data.foliage {
+                return color;
+            }
         }
     }
 
@@ -131,7 +135,8 @@ fn get_112_leaves_color(world: &World, dimension: &Dimension, pos: BlockPos, sta
 fn get_water_color(world: &World, dimension: &Dimension, pos: BlockPos, _state: &IBlockState) -> glam::IVec3 {
     dimension.get_biome(pos)
         .and_then(|biome| world.resources.get_tint_data(&biome))
-        .map_or_else(|| glam::IVec3::new(0xff, 0xff, 0xff), |tint_data| tint_data.water)
+        .and_then(|tint_data| tint_data.water)
+        .unwrap_or_else(|| glam::IVec3::new(0x3f, 0x76, 0xe4))
 }
 
 fn get_112_cauldron_color(world: &World, dimension: &Dimension, pos: BlockPos, state: &IBlockState) -> glam::IVec3 {

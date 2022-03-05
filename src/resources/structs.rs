@@ -314,18 +314,9 @@ pub(super) struct Animation {
     pub(super) height: u32,
 }
 
+#[derive(Default)]
 pub struct TintData {
-    pub grass: glam::IVec3,
-    pub foliage: glam::IVec3,
-    pub water: glam::IVec3,
-}
-
-impl Default for TintData {
-    fn default() -> Self {
-        TintData {
-            grass: glam::IVec3::new(255, 255, 255),
-            foliage: glam::IVec3::new(255, 255, 255),
-            water: glam::IVec3::new(255, 255, 255),
-        }
-    }
+    pub grass: Option<glam::IVec3>,
+    pub foliage: Option<glam::IVec3>,
+    pub water: Option<glam::IVec3>,
 }

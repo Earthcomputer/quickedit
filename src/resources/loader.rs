@@ -300,17 +300,17 @@ fn load_data(mc_version: &str, resource_packs: &mut [Box<dyn ResourcePack>], res
         Ok(tint_data) => {
             for grass_data in tint_data.grass.data {
                 for biome in grass_data.keys {
-                    resources.tint_data.entry(biome).or_default().grass = glam::IVec3::new((grass_data.color) >> 16 & 0xff, (grass_data.color >> 8) & 0xff, grass_data.color & 0xff);
+                    resources.tint_data.entry(biome).or_default().grass = Some(glam::IVec3::new((grass_data.color) >> 16 & 0xff, (grass_data.color >> 8) & 0xff, grass_data.color & 0xff));
                 }
             }
             for foliage_data in tint_data.foliage.data {
                 for biome in foliage_data.keys {
-                    resources.tint_data.entry(biome).or_default().foliage = glam::IVec3::new((foliage_data.color) >> 16 & 0xff, (foliage_data.color >> 8) & 0xff, foliage_data.color & 0xff);
+                    resources.tint_data.entry(biome).or_default().foliage = Some(glam::IVec3::new((foliage_data.color) >> 16 & 0xff, (foliage_data.color >> 8) & 0xff, foliage_data.color & 0xff));
                 }
             }
             for water_data in tint_data.water.data {
                 for biome in water_data.keys {
-                    resources.tint_data.entry(biome).or_default().water = glam::IVec3::new((water_data.color) >> 16 & 0xff, (water_data.color >> 8) & 0xff, water_data.color & 0xff);
+                    resources.tint_data.entry(biome).or_default().water = Some(glam::IVec3::new((water_data.color) >> 16 & 0xff, (water_data.color >> 8) & 0xff, water_data.color & 0xff));
                 }
             }
         }

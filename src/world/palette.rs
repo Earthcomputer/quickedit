@@ -31,7 +31,11 @@ macro_rules! define_paletted_data {
                 let (bits_per_block, entries_per_long) = if data.is_empty() {
                     (0, 0)
                 } else {
-                    let bits_per_block = (((palette.len() - 1).log2() + 1) as u8).max($default_palette_size.log2() as u8);
+                    let bits_per_block = if palette.len() <= 1 {
+                        1
+                    } else {
+                        (((palette.len() - 1).log2() + 1) as u8).max($default_palette_size.log2() as u8)
+                    };
                     let entries_per_long = 64_u8 / bits_per_block;
                     (bits_per_block, entries_per_long)
                 };
