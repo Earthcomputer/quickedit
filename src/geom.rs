@@ -374,6 +374,6 @@ pub fn iter_diamond(center: IVec2) -> impl Iterator<Item = IVec2> {
 
 pub fn iter_diamond_within_square(center: IVec2, radius: i32) -> impl Iterator<Item = IVec2> {
     return iter_diamond(center)
-        .filter(move |pos| pos.rectangular_distance(center) <= radius)
-        .take_while(move |pos| pos.taxicab_distance(center) <= radius * 2);
+        .take_while(move |pos| pos.taxicab_distance(center) <= radius * 2)
+        .filter(move |pos| pos.rectangular_distance(center) <= radius);
 }
