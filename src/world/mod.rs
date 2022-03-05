@@ -7,6 +7,7 @@ mod io;
 mod palette;
 mod structs;
 mod versioned_io;
+#[allow(clippy::mutex_atomic)]
 pub mod workers;
 
 lazy_static! {
