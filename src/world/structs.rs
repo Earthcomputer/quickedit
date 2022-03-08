@@ -236,11 +236,16 @@ pub struct World {
 impl World {
     #[profiling::function]
     pub fn load(path: PathBuf, interaction_handler: &mut dyn minecraft::DownloadInteractionHandler) -> io::Result<WorldRef> {
+        let resources_zip = path.join("resources.zip");
+        let mut resource_packs = Vec::new();
+        if resources_zip.exists() && resources_zip.is_file() {
+            resource_packs.push(&resources_zip);
+        }
         let level_dat = path.join("level.dat");
         let level_dat_version = get_level_dat_version(&mut nbt::de::Decoder::new(read::GzDecoder::new(File::open(&level_dat)?)))?;
         let level_dat: LevelDat = VersionedSerde::deserialize(level_dat_version, level_dat_version, &mut nbt::de::Decoder::new(read::GzDecoder::new(File::open(&level_dat)?)))?;
         let mc_version = level_dat.data.version.name.clone();
-        let resources = match resources::loader::load(&mc_version, &Vec::new(), interaction_handler) {
+        let resources = match resources::loader::load(&mc_version, &resource_packs, interaction_handler) {
             Some(r) => Arc::new(r),
             None => return Err(io::Error::new(io::ErrorKind::Other, "Failed to load resources")),
         };
