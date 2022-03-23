@@ -3,6 +3,7 @@ use std::io;
 use std::path::PathBuf;
 use ahash::{AHashMap, AHashSet};
 use image::GenericImageView;
+use log::warn;
 use crate::fname::FName;
 use crate::{CommonFNames, minecraft, ResourceLocation};
 use crate::resources;
@@ -24,7 +25,7 @@ fn load_resource_pack(_mc_version: &str, resource_pack: &mut dyn ResourcePack, r
             let blockstate: BlockstateFile = match serde_json::from_reader(blockstate_reader) {
                 Ok(blockstate) => blockstate,
                 Err(e) => {
-                    eprintln!("Error parsing blockstate {}: {}", block_name, e);
+                    warn!("Error parsing blockstate {}: {}", block_name, e);
                     continue;
                 }
             };
@@ -71,7 +72,7 @@ fn load_models(_mc_version: &str, resource_packs: &mut [Box<dyn ResourcePack>], 
         let model_reader = match get_resource(resource_packs, format!("assets/{}/models/{}.json", model_id.namespace, model_id.name).as_str()) {
             Ok(Some(reader)) => reader,
             _ => {
-                eprintln!("Error loading model {}", model_id);
+                warn!("Error loading model {}", model_id);
                 loaded_models.insert(model_id, RefCell::new(None));
                 continue
             }
@@ -79,7 +80,7 @@ fn load_models(_mc_version: &str, resource_packs: &mut [Box<dyn ResourcePack>], 
         let mut model: PartialBlockModel = match serde_json::from_reader(model_reader) {
             Ok(model) => model,
             Err(e) => {
-                eprintln!("Error parsing model {}: {}", model_id, e);
+                warn!("Error parsing model {}: {}", model_id, e);
                 loaded_models.insert(model_id, RefCell::new(None));
                 continue
             }
@@ -148,7 +149,7 @@ fn load_models(_mc_version: &str, resource_packs: &mut [Box<dyn ResourcePack>], 
         let model = match model_cell.as_mut() {
             Some(model) => model,
             None => {
-                eprintln!("Error loading model {}", model_id);
+                warn!("Error loading model {}", model_id);
                 continue
             }
         };
@@ -175,13 +176,13 @@ fn load_models(_mc_version: &str, resource_packs: &mut [Box<dyn ResourcePack>], 
             match &model.textures[&texture_id] {
                 TextureVariable::Imm(texture) => new_textures.insert(texture_id.to_string(), FName::new(texture.clone())),
                 TextureVariable::Ref(_) => {
-                    eprintln!("Error loading texture {}", texture_id);
+                    warn!("Error loading texture {}", texture_id);
                     continue;
                 }
             };
         }
         if model.elements.is_none() {
-            eprintln!("Error loading model {}", model_id);
+            warn!("Error loading model {}", model_id);
             continue;
         }
 
@@ -211,13 +212,13 @@ fn load_textures(_mc_version: &str, resource_packs: &mut [Box<dyn ResourcePack>]
             let mut texture_reader = match get_resource(resource_packs, format!("assets/{}/textures/{}.png", texture.namespace, texture.name).as_str()) {
                 Ok(Some(reader)) => reader,
                 _ => {
-                    eprintln!("Texture not found: {}", texture);
+                    warn!("Texture not found: {}", texture);
                     continue
                 }
             };
             let mut png_data = Vec::new();
             if texture_reader.read_to_end(&mut png_data).is_err() {
-                eprintln!("Error reading texture: {}", texture);
+                warn!("Error reading texture: {}", texture);
                 continue
             }
             png_data
@@ -225,7 +226,7 @@ fn load_textures(_mc_version: &str, resource_packs: &mut [Box<dyn ResourcePack>]
         let image = match image::load(io::Cursor::new(png_data), image::ImageFormat::Png) {
             Ok(image) => image,
             Err(err) => {
-                eprintln!("Error loading texture: {}", err);
+                warn!("Error loading texture: {}", err);
                 continue
             }
         }.to_rgba8();
@@ -234,14 +235,14 @@ fn load_textures(_mc_version: &str, resource_packs: &mut [Box<dyn ResourcePack>]
                 match serde_json::from_reader(reader) {
                     Ok(animation) => Some(animation),
                     Err(err) => {
-                        eprintln!("Error loading texture animation: {}", err);
+                        warn!("Error loading texture animation: {}", err);
                         continue
                     }
                 }
             }
             Ok(None) => None,
             Err(err) => {
-                eprintln!("Error loading texture animation: {}", err);
+                warn!("Error loading texture animation: {}", err);
                 continue
             }
         };
@@ -251,11 +252,11 @@ fn load_textures(_mc_version: &str, resource_packs: &mut [Box<dyn ResourcePack>]
                 if height <= image.height() {
                     image.view(0, 0, image.width(), height).to_image()
                 } else {
-                    eprintln!("Invalid texture animation: {}", texture);
+                    warn!("Invalid texture animation: {}", texture);
                     continue
                 }
             } else {
-                eprintln!("Invalid texture animation: {}", texture);
+                warn!("Invalid texture animation: {}", texture);
                 continue
             }
         } else {
@@ -276,16 +277,16 @@ fn load_colormap(resource_packs: &mut [Box<dyn ResourcePack>], typ: &str) -> Opt
         Ok(Some(mut reader)) => {
             let mut image_data = Vec::new();
             if reader.read_to_end(&mut image_data).is_err() {
-                eprintln!("Error reading {} colormap", typ);
+                warn!("Error reading {} colormap", typ);
             } else {
                 match image::load_from_memory_with_format(&image_data, image::ImageFormat::Png) {
                     Ok(image) => return Some(image.to_rgba8()),
-                    Err(e) => eprintln!("Error loading {} colormap: {}", typ, e),
+                    Err(e) => warn!("Error loading {} colormap: {}", typ, e),
                 }
             }
         }
-        Ok(None) => eprintln!("Error loading {} colormap", typ),
-        Err(e) => eprintln!("Error loading {} colormap: {}", typ, e)
+        Ok(None) => warn!("Error loading {} colormap", typ),
+        Err(e) => warn!("Error loading {} colormap: {}", typ, e)
     }
     None
 }
@@ -293,7 +294,7 @@ fn load_colormap(resource_packs: &mut [Box<dyn ResourcePack>], typ: &str) -> Opt
 fn load_data(mc_version: &str, resource_packs: &mut [Box<dyn ResourcePack>], resources: &mut Resources) {
     match minecraft::get_biome_data(mc_version) {
         Ok(biome_data) => resources.biomes = biome_data,
-        Err(e) => eprintln!("Error loading biome data: {}", e)
+        Err(e) => warn!("Error loading biome data: {}", e)
     }
 
     match minecraft::get_tint_data(mc_version) {
@@ -314,7 +315,7 @@ fn load_data(mc_version: &str, resource_packs: &mut [Box<dyn ResourcePack>], res
                 }
             }
         }
-        Err(e) => eprintln!("Error loading tint data: {}", e)
+        Err(e) => warn!("Error loading tint data: {}", e)
     }
 
     resources.grass_colormap = load_colormap(resource_packs, "grass");
@@ -330,9 +331,9 @@ pub fn load(mc_version: &str, resource_packs: &[&PathBuf], interaction_handler: 
             Ok(resource_pack) => resource_pack,
             Err(e) => {
                 if let Some(string) = resource_pack.to_str() {
-                    eprintln!("Error loading resource pack {}: {}", string, e);
+                    warn!("Error loading resource pack {}: {}", string, e);
                 } else {
-                    eprintln!("Error loading resource pack: {}", e);
+                    warn!("Error loading resource pack: {}", e);
                 }
                 continue;
             }

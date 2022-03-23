@@ -3,6 +3,7 @@ use lazy_static::lazy_static;
 use winit::{dpi, event};
 use std::cell::RefCell;
 use egui::Color32;
+use log::info;
 use crate::{minecraft, world, renderer};
 use crate::util::MainThreadStore;
 
@@ -79,7 +80,6 @@ fn move_cursor_to_middle() -> Result<(), winit::error::ExternalError> {
     let window_size = {
         profiling::scope!("get_window_size");
         *WINDOW_SIZE.borrow_mut().get_or_insert_with(|| {
-            println!("Getting window size");
             let size = window.inner_size();
             (size.width, size.height)
         })
@@ -110,8 +110,7 @@ pub fn handle_event(ui_state: &mut UiState, event: &event::WindowEvent) {
                 renderer::get_display().gl_window().window().set_cursor_visible(true);
             }
         }
-        event::WindowEvent::Resized(size) => {
-            println!("Resizing window: {}, {}", size.width, size.height);
+        event::WindowEvent::Resized(_) => {
             *WINDOW_SIZE.borrow_mut() = None;
         }
         _ => {}
@@ -218,15 +217,15 @@ struct UiInteractionHandler;
 // TODO: make this an actual UI handler
 impl minecraft::DownloadInteractionHandler for UiInteractionHandler {
     fn show_download_prompt(&mut self, mc_version: &str) -> bool {
-        println!("Downloading {}", mc_version);
+        info!("Downloading {}", mc_version);
         true
     }
 
     fn on_start_download(&mut self) {
-        println!("Download started");
+        info!("Download started");
     }
 
     fn on_finish_download(&mut self) {
-        println!("Download finished");
+        info!("Download finished");
     }
 }

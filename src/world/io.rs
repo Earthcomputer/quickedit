@@ -10,6 +10,7 @@ use dashmap::mapref::entry::Entry;
 use dashmap::try_result::TryResult;
 use flate2::read;
 use glam::IVec2;
+use log::warn;
 use positioned_io_preview::{RandomAccessFile, ReadAt, ReadBytesAtExt};
 use serde::{Deserialize, Deserializer};
 use crate::{CommonFNames, convert, World};
@@ -65,7 +66,7 @@ impl Dimension {
             result
         }).map_err(|err| {
             if err.kind() != io::ErrorKind::NotFound {
-                eprintln!("Failed to load chunk: {}", err);
+                warn!("Failed to load chunk: {}", err);
             }
         }).ok()
     }
@@ -106,7 +107,7 @@ impl Dimension {
                 Ok(file) => file.ok_or(())?,
                 Err(e) => {
                     if e.kind() != io::ErrorKind::NotFound {
-                        eprintln!("Failed to get region file: {}", e);
+                        warn!("Failed to get region file: {}", e);
                     }
                     return Ok(false);
                 }
@@ -116,7 +117,7 @@ impl Dimension {
                 Ok(_) => Ok(true),
                 Err(e) => {
                     if e.kind() != io::ErrorKind::UnexpectedEof {
-                        eprintln!("Error checking existence of chunk: {}", e);
+                        warn!("Error checking existence of chunk: {}", e);
                     }
                     Ok(false)
                 }

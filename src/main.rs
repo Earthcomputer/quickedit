@@ -38,10 +38,12 @@ use std::{thread, time};
 use std::collections::vec_deque::VecDeque;
 use std::lazy::SyncOnceCell;
 use egui::{FontData, FontDefinitions, FontFamily};
+use flexi_logger::Logger;
 use glium::{glutin::{dpi, event, event_loop, window, ContextBuilder}, Display};
 use glium::Surface;
 use image::GenericImageView;
 use lazy_static::lazy_static;
+use log::{info, warn};
 use winit::window::Icon;
 use serde::{Deserialize, Serialize};
 use structopt::StructOpt;
@@ -126,7 +128,31 @@ fn create_display(event_loop: &event_loop::EventLoop<()>) -> glium::Display {
     Display::new(window_builder, context_builder, event_loop).unwrap()
 }
 
+#[cfg(feature = "log-files")]
+fn make_logger() -> Logger {
+    use flexi_logger::{Age, Cleanup, Criterion, Duplicate, FileSpec, Naming, WriteMode};
+    Logger::try_with_str("info").unwrap()
+        .log_to_file(FileSpec::default().directory("logs"))
+        .write_mode(WriteMode::BufferAndFlush)
+        .duplicate_to_stderr(Duplicate::All)
+        .rotate(Criterion::Age(Age::Day), Naming::Timestamps, Cleanup::KeepLogAndCompressedFiles(1, 20))
+}
+
+#[cfg(not(feature = "log-files"))]
+fn make_logger() -> Logger {
+    Logger::try_with_str("info").unwrap().log_to_stderr()
+}
+
 fn main() {
+    let _logger = match make_logger().start() {
+        Ok(logger) => logger,
+        Err(err) => {
+            warn!("Failed to initialize logger: {}", err);
+            std::process::exit(1);
+        }
+    };
+    log_panics::init();
+
     profiling::register_thread!("main");
 
     CMD_LINE_ARGS.set(CmdLineArgs::from_args()).unwrap();
@@ -156,23 +182,23 @@ fn main() {
         struct CmdLineInteractionHandler;
         impl minecraft::DownloadInteractionHandler for CmdLineInteractionHandler {
             fn show_download_prompt(&mut self, mc_version: &str) -> bool {
-                println!("Downloading Minecraft {}", mc_version);
+                info!("Downloading Minecraft {}", mc_version);
                 true
             }
 
             fn on_start_download(&mut self) {
-                println!("Starting download...");
+                info!("Starting download...");
             }
 
             fn on_finish_download(&mut self) {
-                println!("Finished download");
+                info!("Finished download");
             }
         }
         let mut interaction_handler = CmdLineInteractionHandler{};
         let world = match world::World::load(world_folder, &mut interaction_handler) {
             Ok(world) => world,
             Err(err) => {
-                println!("Failed to load world: {}", err);
+                warn!("Failed to load world: {}", err);
                 return;
             }
         };
@@ -280,13 +306,13 @@ lazy_static! {
         RwLock::new(match std::fs::File::open("quickedit_config.json") {
             Ok(file) => {
                 serde_json::from_reader(file).unwrap_or_else(|err| {
-                    eprintln!("Failed to load config: {}", err);
+                    warn!("Failed to load config: {}", err);
                     Config::default()
                 })
             },
             Err(e) => {
                 if e.kind() != std::io::ErrorKind::NotFound {
-                    eprintln!("Failed to open config file: {}", e);
+                    warn!("Failed to open config file: {}", e);
                 }
                 Config::default()
             },
@@ -309,7 +335,7 @@ pub fn modify_config(f: impl FnOnce(&mut Config)) {
     f(&mut *config);
     let json = serde_json::to_string_pretty(&*config).unwrap();
     if let Err(e) = std::fs::write("quickedit_config.json", json) {
-        eprintln!("Failed to save config: {}", e);
+        warn!("Failed to save config: {}", e);
     }
 }
 
