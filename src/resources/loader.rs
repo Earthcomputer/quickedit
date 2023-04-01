@@ -13,7 +13,6 @@ use crate::resources::{atlas, Resources};
 use crate::resources::atlas::MAX_SUPPORTED_TEXTURE_SIZE;
 use crate::resources::structs::{Animation, BlockModel, BlockstateFile, PartialBlockModel, TextureVariable};
 
-#[profiling::function]
 fn load_resource_pack(_mc_version: &str, resource_pack: &mut dyn ResourcePack, resources: &mut Resources) {
     for namespace in resource_pack.get_sub_files("assets/", "/") {
         for block_name in resource_pack.get_sub_files(&format!("assets/{}/blockstates/", &namespace), ".json") {
@@ -34,13 +33,11 @@ fn load_resource_pack(_mc_version: &str, resource_pack: &mut dyn ResourcePack, r
     }
 }
 
-#[profiling::function]
 fn load_resources(mc_version: &str, resource_packs: &mut [Box<dyn ResourcePack>], resources: &mut Resources) {
     load_models(mc_version, resource_packs, resources);
     load_textures(mc_version, resource_packs, resources);
 }
 
-#[profiling::function]
 fn load_models(_mc_version: &str, resource_packs: &mut [Box<dyn ResourcePack>], resources: &mut Resources) {
     let mut models_to_load = AHashSet::new();
     for blockstate in resources.blockstates.values() {
@@ -194,7 +191,6 @@ fn load_models(_mc_version: &str, resource_packs: &mut [Box<dyn ResourcePack>], 
     }
 }
 
-#[profiling::function]
 fn load_textures(_mc_version: &str, resource_packs: &mut [Box<dyn ResourcePack>], resources: &mut Resources) {
     let mut textures_to_load = AHashSet::new();
     for model in resources.block_models.values() {
@@ -271,7 +267,6 @@ fn load_textures(_mc_version: &str, resource_packs: &mut [Box<dyn ResourcePack>]
     resources.block_atlas = atlas::stitch(&textures, &mut resources.mipmap_levels, *MAX_SUPPORTED_TEXTURE_SIZE, *MAX_SUPPORTED_TEXTURE_SIZE).unwrap();
 }
 
-#[profiling::function]
 fn load_colormap(resource_packs: &mut [Box<dyn ResourcePack>], typ: &str) -> Option<image::RgbaImage> {
     match get_resource(resource_packs, format!("assets/minecraft/textures/colormap/{}.png", typ).as_str()) {
         Ok(Some(mut reader)) => {
@@ -322,7 +317,6 @@ fn load_data(mc_version: &str, resource_packs: &mut [Box<dyn ResourcePack>], res
     resources.foliage_colormap = load_colormap(resource_packs, "foliage");
 }
 
-#[profiling::function]
 pub fn load(mc_version: &str, resource_packs: &[&PathBuf], interaction_handler: &mut dyn minecraft::DownloadInteractionHandler) -> Option<Resources> {
     let mut resources = Resources::default();
     let mut resource_pack_list: Vec<Box<dyn ResourcePack>> = vec![Box::new(BuiltinResourcePack)];

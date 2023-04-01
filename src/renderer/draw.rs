@@ -61,13 +61,11 @@ impl WorldRenderer {
         }
     }
 
-    #[profiling::function]
-    pub fn has_changed(&self) -> bool {
+        pub fn has_changed(&self) -> bool {
         true
     }
 
-    #[profiling::function]
-    pub fn render_world(&self, world: &World, target: &mut glium::Frame) {
+        pub fn render_world(&self, world: &World, target: &mut glium::Frame) {
         let (dimension, camera_pos, yaw, pitch) = {
             let camera = world.camera.read().unwrap();
             (camera.dimension.clone(), camera.pos, camera.yaw, camera.pitch)
@@ -110,7 +108,7 @@ impl WorldRenderer {
             }
         };
 
-        self.render_existing_chunks(world, &*dimension, target, &uniforms(current_chunk), current_chunk);
+        self.render_existing_chunks(world, dimension, target, &uniforms(current_chunk), current_chunk);
 
         let mut chunks_to_render = Vec::new();
 
@@ -126,14 +124,14 @@ impl WorldRenderer {
         for (pos, chunk) in &chunks_to_render {
             DEFAULT_DRAW_PARAMS.with(|params| {
                 (*chunk.baked_geometry).borrow().opaque_geometry.draw(
-                    target, &*self.shader_program, &uniforms(*pos), params
+                    target, &self.shader_program, &uniforms(*pos), params
                 );
             });
         }
         for (pos, chunk) in &chunks_to_render {
             DEFAULT_DRAW_PARAMS.with(|params| {
                 (*chunk.baked_geometry).borrow().transparent_geometry.draw(
-                    target, &*self.transparent_shader_program, &uniforms(*pos), params
+                    target, &self.transparent_shader_program, &uniforms(*pos), params
                 );
             });
         }
@@ -143,7 +141,7 @@ impl WorldRenderer {
 
         for (pos, chunk) in &chunks_to_render {
             (*chunk.baked_geometry).borrow().translucent_geometry.draw(
-                target, &*self.shader_program, &uniforms(*pos), &alpha_params
+                target, &self.shader_program, &uniforms(*pos), &alpha_params
             );
         }
     }

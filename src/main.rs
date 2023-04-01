@@ -1,13 +1,8 @@
 #![feature(can_vector)]
-#![feature(derive_default_enum)]
 #![feature(downcast_unchecked)]
 #![feature(exact_size_is_empty)]
-#![feature(explicit_generic_args_with_impl_trait)]
-#![feature(int_log)]
 #![feature(int_roundings)]
 #![feature(map_try_insert)]
-#![feature(once_cell)]
-#![feature(option_result_contains)]
 #![feature(read_buf)]
 #![feature(try_blocks)]
 #![feature(try_find)]
@@ -33,15 +28,13 @@ mod debug;
 mod convert;
 
 use std::path::PathBuf;
-use std::sync::{Mutex, RwLock, RwLockReadGuard};
+use std::sync::{Mutex, OnceLock, RwLock, RwLockReadGuard};
 use std::{thread, time};
 use std::collections::vec_deque::VecDeque;
-use std::lazy::SyncOnceCell;
 use egui::{FontData, FontDefinitions, FontFamily};
 use flexi_logger::Logger;
 use glium::{glutin::{dpi, event, event_loop, window, ContextBuilder}, Display};
 use glium::Surface;
-use image::GenericImageView;
 use lazy_static::lazy_static;
 use log::{info, warn};
 use winit::window::Icon;
@@ -153,19 +146,17 @@ fn main() {
     };
     log_panics::init();
 
-    profiling::register_thread!("main");
-
     CMD_LINE_ARGS.set(CmdLineArgs::from_args()).unwrap();
 
-    let event_loop = event_loop::EventLoop::with_user_event();
+    let event_loop = event_loop::EventLoopBuilder::with_user_event().build();
     let display = create_display(&event_loop);
 
-    let mut egui_glium = egui_glium::EguiGlium::new(&display);
+    let mut egui_glium = egui_glium::EguiGlium::new(&display, &event_loop);
 
     let mut fonts = FontDefinitions::default();
     fonts.font_data.insert("MinecraftRegular".to_owned(), FontData::from_static(FONT_DATA));
-    fonts.fonts_for_family.get_mut(&FontFamily::Proportional).unwrap().insert(0, "MinecraftRegular".to_owned());
-    fonts.fonts_for_family.get_mut(&FontFamily::Monospace).unwrap().push("MinecraftRegular".to_owned());
+    fonts.families.get_mut(&FontFamily::Proportional).unwrap().insert(0, "MinecraftRegular".to_owned());
+    fonts.families.get_mut(&FontFamily::Monospace).unwrap().push("MinecraftRegular".to_owned());
     egui_glium.egui_ctx.set_fonts(fonts);
 
     let _main_thread_data = unsafe {
@@ -222,7 +213,6 @@ fn main() {
             let start_time = std::time::Instant::now();
 
             {
-                profiling::scope!("queued_tasks");
                 let mut queued_tasks = QUEUED_TASKS.lock().unwrap();
                 for task in queued_tasks.drain(..) {
                     task();
@@ -231,7 +221,7 @@ fn main() {
 
             let mut quit = false;
 
-            let (_, shapes) = egui_glium.run(&display, |egui_ctx| {
+            let _ = egui_glium.run(&display, |egui_ctx| {
                 ui::run_ui(&ui_state, egui_ctx, &mut quit);
                 ui::tick(&mut ui_state, egui_ctx);
             });
@@ -239,7 +229,6 @@ fn main() {
             workers::tick();
 
             {
-                profiling::scope!("non_urgent_queued_tasks");
                 let mut non_urgent_queued_tasks = NON_URGENT_QUEUED_TASKS.lock().unwrap();
                 while !non_urgent_queued_tasks.is_empty() && time::Instant::now() - start_time < time::Duration::from_millis(MSPT) {
                     let task = non_urgent_queued_tasks.pop_front().unwrap();
@@ -260,10 +249,10 @@ fn main() {
                 {
                     let worlds = world::WORLDS.read().unwrap();
                     if let Some(world) = worlds.last() {
-                        world.renderer.render_world(&*world, &mut target);
+                        world.renderer.render_world(world, &mut target);
                     }
                 }
-                egui_glium.paint(&display, &mut target, shapes);
+                egui_glium.paint(&display, &mut target);
                 target.finish().unwrap();
             }
         };
@@ -281,7 +270,7 @@ fn main() {
                     *control_flow = event_loop::ControlFlow::Exit;
                 }
 
-                if !egui_glium.on_event(&event) {
+                if !egui_glium.on_event(&event).consumed {
                     ui::handle_event(&mut ui_state, &event);
                 }
 
@@ -320,7 +309,7 @@ lazy_static! {
     };
 }
 
-static CMD_LINE_ARGS: SyncOnceCell<CmdLineArgs> = SyncOnceCell::new();
+static CMD_LINE_ARGS: OnceLock<CmdLineArgs> = OnceLock::new();
 
 pub fn get_cmd_line_args() -> &'static CmdLineArgs {
     CMD_LINE_ARGS.get().unwrap()
@@ -332,7 +321,7 @@ pub fn get_config() -> RwLockReadGuard<'static, Config> {
 
 pub fn modify_config(f: impl FnOnce(&mut Config)) {
     let mut config = CONFIG.write().unwrap();
-    f(&mut *config);
+    f(&mut config);
     let json = serde_json::to_string_pretty(&*config).unwrap();
     if let Err(e) = std::fs::write("quickedit_config.json", json) {
         warn!("Failed to save config: {}", e);

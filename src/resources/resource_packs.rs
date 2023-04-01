@@ -7,7 +7,6 @@ use zip::result::ZipError;
 use zip::ZipArchive;
 use crate::util;
 
-#[profiling::function]
 pub(super) fn get_resource_pack(path: &Path) -> io::Result<Box<dyn ResourcePack>> {
     if util::is_dir(path) {
         Ok(Box::new(DirectoryResourcePack::new(path.to_path_buf())))
@@ -107,7 +106,6 @@ impl ResourcePack for DirectoryResourcePack {
     }
 }
 
-#[profiling::function]
 pub(super) fn get_resource<'a>(resource_packs: &'a mut [Box<dyn ResourcePack>], path: &str) -> io::Result<Option<Box<dyn io::Read + 'a>>> {
     for resource_pack in resource_packs {
         match resource_pack.get_reader(path) {

@@ -1,3 +1,5 @@
+#![allow(clippy::type_complexity)]
+
 use std::hash::Hash;
 use ahash::AHashMap;
 use lazy_static::lazy_static;

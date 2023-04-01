@@ -31,7 +31,6 @@ impl WorldRef {
                         b = b.stack_size(stack_size);
                     }
                     b.spawn(|| {
-                        profiling::register_thread!();
                         thread.run();
                     })?;
                     Ok(())
@@ -74,12 +73,11 @@ impl WorldRef {
 impl Deref for WorldRef {
     type Target = World;
     fn deref(&self) -> &World {
-        &*self.world
+        &self.world
     }
 }
 impl Drop for WorldRef {
-    #[profiling::function]
-    fn drop(&mut self) {
+        fn drop(&mut self) {
         self.dropping.store(true, Ordering::Relaxed);
         drop(self.num_jobs_semaphore.1.wait_while(self.num_jobs_semaphore.0.lock().unwrap(), |num_jobs| *num_jobs > 0).unwrap());
     }
@@ -90,7 +88,6 @@ lazy_static! {
     static ref GLOBAL_TICK_MUTEX: Mutex<usize> = Mutex::new(0);
 }
 
-#[profiling::function]
 pub fn tick() {
     {
         let mut global_tick_mutex = GLOBAL_TICK_MUTEX.lock().unwrap();
@@ -99,12 +96,10 @@ pub fn tick() {
     GLOBAL_TICK_VAR.notify_all();
 }
 
-#[profiling::function]
 pub fn worker_yield() {
     drop(GLOBAL_TICK_VAR.wait(GLOBAL_TICK_MUTEX.lock().unwrap()).unwrap());
 }
 
-#[profiling::function]
 pub(super) fn chunk_loader(world: Arc<World>, stop: &dyn Fn() -> bool) {
     let render_distance = crate::get_config().render_distance() as i32;
     let mut prev_dimension: Option<FName> = None;
@@ -145,7 +140,7 @@ pub(super) fn chunk_loader(world: Arc<World>, stop: &dyn Fn() -> bool) {
         while !chunks_to_unload.is_empty() {
             let (dimension, chunk_pos) = chunks_to_unload.pop_front().unwrap();
             if let Some(dimension) = world.get_dimension(&dimension) {
-                if dimension.unload_chunk(&*world, chunk_pos) {
+                if dimension.unload_chunk(&world, chunk_pos) {
                     break;
                 }
             }
@@ -161,8 +156,8 @@ pub(super) fn chunk_loader(world: Arc<World>, stop: &dyn Fn() -> bool) {
 
         for chunk_pos in geom::iter_diamond_within_square(chunk_pos, render_distance) {
             if dimension.get_chunk(chunk_pos).is_none()
-                && dimension.does_chunk_exist(&*world, chunk_pos)
-                && dimension.load_chunk(&*world, chunk_pos).is_some()
+                && dimension.does_chunk_exist(&world, chunk_pos)
+                && dimension.load_chunk(&world, chunk_pos).is_some()
             {
                 continue 'outer_loop;
             }

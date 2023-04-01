@@ -3,6 +3,7 @@ use lazy_static::lazy_static;
 use winit::{dpi, event};
 use std::cell::RefCell;
 use egui::Color32;
+use egui_glium::egui_winit::winit::window::CursorGrabMode;
 use log::info;
 use crate::{minecraft, world, renderer};
 use crate::util::MainThreadStore;
@@ -19,8 +20,7 @@ struct KeyStates {
     mouse_dy: f64,
 }
 
-#[profiling::function]
-pub fn run_ui(_state: &UiState, egui_ctx: &egui::CtxRef, _quit: &mut bool) {
+pub fn run_ui(_state: &UiState, egui_ctx: &egui::Context, _quit: &mut bool) {
     let (x, y, z, yaw, pitch) = {
         let worlds = world::WORLDS.read().unwrap();
         match worlds.last() {
@@ -70,25 +70,20 @@ lazy_static! {
     static ref WINDOW_SIZE: MainThreadStore<RefCell<Option<(u32, u32)>>> = MainThreadStore::new(RefCell::new(None));
 }
 
-#[profiling::function]
 fn move_cursor_to_middle() -> Result<(), winit::error::ExternalError> {
     let gl_window = {
-        profiling::scope!("get_window");
         renderer::get_display().gl_window()
     };
     let window = gl_window.window();
     let window_size = {
-        profiling::scope!("get_window_size");
         *WINDOW_SIZE.borrow_mut().get_or_insert_with(|| {
             let size = window.inner_size();
             (size.width, size.height)
         })
     };
-    profiling::scope!("move_cursor_to_middle");
     window.set_cursor_position(dpi::PhysicalPosition::new(window_size.0 as f32 * 0.5, window_size.1 as f32 * 0.5))
 }
 
-#[profiling::function]
 pub fn handle_event(ui_state: &mut UiState, event: &event::WindowEvent) {
     match event {
         event::WindowEvent::MouseInput {
@@ -98,7 +93,7 @@ pub fn handle_event(ui_state: &mut UiState, event: &event::WindowEvent) {
         } => {
             if !ui_state.key_states.mouse_grabbed {
                 ui_state.key_states.mouse_grabbed = true;
-                if renderer::get_display().gl_window().window().set_cursor_grab(true).is_ok() {
+                if renderer::get_display().gl_window().window().set_cursor_grab(CursorGrabMode::Locked).is_ok() {
                     renderer::get_display().gl_window().window().set_cursor_visible(false);
                     let _ = move_cursor_to_middle(); // ignore errors
                 }
@@ -106,7 +101,7 @@ pub fn handle_event(ui_state: &mut UiState, event: &event::WindowEvent) {
         }
         event::WindowEvent::Focused(false) => {
             ui_state.key_states.mouse_grabbed = false;
-            if renderer::get_display().gl_window().window().set_cursor_grab(false).is_ok() {
+            if renderer::get_display().gl_window().window().set_cursor_grab(CursorGrabMode::None).is_ok() {
                 renderer::get_display().gl_window().window().set_cursor_visible(true);
             }
         }
@@ -117,7 +112,6 @@ pub fn handle_event(ui_state: &mut UiState, event: &event::WindowEvent) {
     }
 }
 
-#[profiling::function]
 pub fn handle_device_event(ui_state: &mut UiState, event: &event::DeviceEvent) {
     match event {
         event::DeviceEvent::MouseMotion { delta: (x, y) } => {
@@ -140,7 +134,7 @@ pub fn handle_device_event(ui_state: &mut UiState, event: &event::DeviceEvent) {
         ) => {
             if ui_state.key_states.mouse_grabbed && matches!(key, event::VirtualKeyCode::Escape) {
                 ui_state.key_states.mouse_grabbed = false;
-                if renderer::get_display().gl_window().window().set_cursor_grab(false).is_ok() {
+                if renderer::get_display().gl_window().window().set_cursor_grab(CursorGrabMode::None).is_ok() {
                     renderer::get_display().gl_window().window().set_cursor_visible(true);
                 }
             }
@@ -149,15 +143,13 @@ pub fn handle_device_event(ui_state: &mut UiState, event: &event::DeviceEvent) {
     }
 }
 
-#[profiling::function]
-pub fn tick(ui_state: &mut UiState, egui_ctx: &egui::CtxRef) {
+pub fn tick(ui_state: &mut UiState, egui_ctx: &egui::Context) {
     if ui_state.key_states.mouse_grabbed {
         handle_camera(ui_state, egui_ctx);
     }
 }
 
-#[profiling::function]
-fn handle_camera(ui_state: &mut UiState, egui_ctx: &egui::CtxRef) {
+fn handle_camera(ui_state: &mut UiState, egui_ctx: &egui::Context) {
     let mut x = 0.0;
     let mut y = 0.0;
     let mut z = 0.0;

@@ -1,8 +1,6 @@
-#![feature(once_cell)]
-
 use proc_macro::TokenStream;
 use std::collections::HashMap;
-use std::lazy::SyncOnceCell;
+use std::sync::OnceLock;
 use quote::{quote, TokenStreamExt};
 use syn::{Fields, Field, FieldsNamed, FnArg, GenericArgument, Ident, ItemFn, ItemStruct, LitInt, parse_macro_input, PathArguments, ReturnType, Signature, Token, Type, parenthesized};
 use syn::parse::{Parse, Parser, ParseStream};
@@ -10,7 +8,7 @@ use syn::punctuated::Punctuated;
 use syn::spanned::Spanned;
 use syn::visit_mut::{visit_ident_mut, VisitMut};
 
-static VERSIONS: SyncOnceCell<Vec<(String, u32)>> = SyncOnceCell::new();
+static VERSIONS: OnceLock<Vec<(String, u32)>> = OnceLock::new();
 fn get_versions() -> &'static Vec<(String, u32)> {
     VERSIONS.get_or_init(|| {
         let mut versions = Vec::new();
@@ -35,7 +33,7 @@ fn get_versions() -> &'static Vec<(String, u32)> {
         versions
     })
 }
-static VERSIONS_BY_NAME: SyncOnceCell<HashMap<String, usize>> = SyncOnceCell::new();
+static VERSIONS_BY_NAME: OnceLock<HashMap<String, usize>> = OnceLock::new();
 fn get_versions_by_name() -> &'static HashMap<String, usize> {
     VERSIONS_BY_NAME.get_or_init(|| {
         let mut versions = HashMap::new();

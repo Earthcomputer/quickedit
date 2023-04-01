@@ -33,8 +33,7 @@ pub struct Resources {
 
 impl Resources {
 
-    #[profiling::function]
-    pub fn get_block_model(&self, state: &IBlockState) -> Option<Vec<TransformedModel>> {
+        pub fn get_block_model(&self, state: &IBlockState) -> Option<Vec<TransformedModel>> {
         let blockstate = self.blockstates.get(&state.block)?;
 
         let model_variants = match blockstate {

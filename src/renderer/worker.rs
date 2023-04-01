@@ -11,7 +11,6 @@ use crate::{blocks, geom, renderer, util, World};
 use crate::blocks::Fluid;
 use crate::world::{Dimension, IBlockState, Subchunk, workers};
 
-#[profiling::function]
 pub fn chunk_render_worker(world: Arc<World>, stop: &dyn Fn() -> bool) {
     while !stop() {
         let dimension_id = world.camera.read().unwrap().dimension.clone();
@@ -33,7 +32,6 @@ pub fn chunk_render_worker(world: Arc<World>, stop: &dyn Fn() -> bool) {
                     return;
                 }
                 loop {
-                    profiling::scope!("build_worker lock loop");
                     if let Some(chunk_store) = world.renderer.chunk_store.get(&dimension_id) {
                         let camera_pos_guard = chunk_store.camera_pos.lock().unwrap();
                         if let Some(camera_pos) = *camera_pos_guard {
@@ -67,7 +65,7 @@ pub fn chunk_render_worker(world: Arc<World>, stop: &dyn Fn() -> bool) {
                     let dimension_id = dimension_id.clone();
                     let world = world.clone();
                     crate::add_non_urgent_queued_task(move || {
-                        upload_chunk_geometry(&*world, dimension_id, chunk_pos, render_distance_chunks);
+                        upload_chunk_geometry(&world, dimension_id, chunk_pos, render_distance_chunks);
                     });
                     break;
                 }
@@ -80,7 +78,6 @@ pub fn chunk_render_worker(world: Arc<World>, stop: &dyn Fn() -> bool) {
     }
 }
 
-#[profiling::function]
 #[allow(clippy::too_many_arguments)] // TODO: simplify this
 fn build_subchunk_geometry(
     world: &Arc<World>,
@@ -117,7 +114,7 @@ fn build_subchunk_geometry(
             *chunk_changed = true;
             subchunk_geometry.clear();
             if let Some(subchunk) = &chunk.subchunks[subchunk_index] {
-                render_subchunk(&**world, &*dimension, chunk_pos, subchunk, subchunk_y, subchunk_geometry);
+                render_subchunk(world, dimension, chunk_pos, subchunk, subchunk_y, subchunk_geometry);
             }
             subchunk_geometry.dirty = false;
             subchunk_geometry.mark_for_upload = true;
@@ -129,11 +126,9 @@ fn build_subchunk_geometry(
     return true;
 }
 
-#[profiling::function]
 fn upload_chunk_geometry(world: &World, dimension: FName, chunk_pos: ChunkPos, render_distance: i32) -> Option<()> {
     let chunk_store = world.renderer.chunk_store.get(&dimension)?;
     let camera_pos_guard = {
-        profiling::scope!("wait_camera_pos_guard");
         chunk_store.camera_pos.lock().unwrap()
     };
     let camera_pos = (*camera_pos_guard)?;

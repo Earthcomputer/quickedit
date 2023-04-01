@@ -57,7 +57,6 @@ pub struct Sprite {
     pub transparency: renderer::Transparency,
 }
 
-#[profiling::function]
 pub(super) fn stitch<P: image::Pixel<Subpixel=u8> + 'static, I: image::GenericImageView<Pixel=P>>(
     textures: &AHashMap<FName, I>,
     mipmap_level: &mut u32,
@@ -232,7 +231,6 @@ pub(super) fn stitch<P: image::Pixel<Subpixel=u8> + 'static, I: image::GenericIm
     })
 }
 
-#[profiling::function]
 fn calc_transparency<P: image::Pixel<Subpixel=u8>, I: image::GenericImageView<Pixel=P>>(texture: &I) -> renderer::Transparency {
     let mut seen_transparent_pixel = false;
     for (_, _, pixel) in texture.pixels() {

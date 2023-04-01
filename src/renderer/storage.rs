@@ -69,8 +69,7 @@ pub(super) struct BakedGeometry {
 }
 
 impl BakedGeometry {
-    #[profiling::function]
-    fn expand_index_buffer(new_size: usize) {
+        fn expand_index_buffer(new_size: usize) {
         let index_buffer: Vec<_> = (0..new_size)
             .flat_map(|i| {
                 let i = i * 4;
@@ -81,8 +80,7 @@ impl BakedGeometry {
         SHARED_INDEX_BUFFER.swap(&RefCell::new(glium::IndexBuffer::new(renderer::get_display(), glium::index::PrimitiveType::TrianglesList, &index_buffer).unwrap()));
     }
 
-    #[profiling::function]
-    pub(super) fn set_buffer_data(&mut self, vertices: &[util::Vertex]) {
+        pub(super) fn set_buffer_data(&mut self, vertices: &[util::Vertex]) {
         if self.vertices.as_ref().map(|verts| verts.len()).unwrap_or(0) < vertices.len() {
             self.vertices = Some(glium::VertexBuffer::new(renderer::get_display(), vertices).unwrap());
             if (**SHARED_INDEX_BUFFER).borrow().len() * 2 < vertices.len() * 3 {
@@ -94,8 +92,7 @@ impl BakedGeometry {
         self.len = vertices.len();
     }
 
-    #[profiling::function]
-    pub(super) fn draw<U>(&self, target: &mut glium::Frame, program: &glium::Program, uniforms: &U, params: &glium::DrawParameters)
+        pub(super) fn draw<U>(&self, target: &mut glium::Frame, program: &glium::Program, uniforms: &U, params: &glium::DrawParameters)
         where U: glium::uniforms::Uniforms
     {
         if let Some(vertices) = &self.vertices {
@@ -121,8 +118,7 @@ pub(super) struct BuiltChunk {
 }
 
 impl BuiltChunk {
-    #[profiling::function]
-    fn new(subchunk_count: u32) -> Self {
+        fn new(subchunk_count: u32) -> Self {
         let mut subchunk_geometry = Vec::with_capacity(subchunk_count as usize);
         for _ in 0..subchunk_count {
             subchunk_geometry.push(SubchunkGeometry::new());
@@ -142,8 +138,7 @@ pub(super) struct ChunkStore {
 }
 
 impl ChunkStore {
-    #[profiling::function]
-    pub(super) fn new(render_distance: u32, subchunk_count: u32) -> Self {
+        pub(super) fn new(render_distance: u32, subchunk_count: u32) -> Self {
         let width = render_distance * 2 + 1;
         let mut chunks = Vec::with_capacity((width * width) as usize);
         for _ in 0..(width * width) {
@@ -163,13 +158,11 @@ impl ChunkStore {
         z * width as usize + x
     }
 
-    #[profiling::function]
-    pub(super) fn get(&self, chunk_pos: ChunkPos) -> impl Deref<Target=BuiltChunk> + DerefMut<Target=BuiltChunk> + '_ {
+        pub(super) fn get(&self, chunk_pos: ChunkPos) -> impl Deref<Target=BuiltChunk> + DerefMut<Target=BuiltChunk> + '_ {
         self.chunks[self.get_index(chunk_pos)].lock().unwrap()
     }
 
-    #[profiling::function]
-    pub(super) fn set_camera_pos(&self, camera_pos: ChunkPos) -> ProfileMutexGuard<Option<ChunkPos>> {
+        pub(super) fn set_camera_pos(&self, camera_pos: ChunkPos) -> ProfileMutexGuard<Option<ChunkPos>> {
         let mut current_camera_pos = self.camera_pos.lock().unwrap();
         if *current_camera_pos == Some(camera_pos) {
             return current_camera_pos;

@@ -339,6 +339,7 @@ pub unsafe fn extend_lifetime<T>(t: &T) -> &'static T {
 pub fn box_compute<T: ?Sized>(bx: &mut Box<T>, f: impl FnOnce(Box<T>) -> Box<T>) {
     let mut other = MaybeUninit::uninit();
     unsafe {
+        #[allow(clippy::swap_ptr_to_ref)]
         std::mem::swap(&mut *other.as_mut_ptr(), bx);
         let other = other.assume_init();
         *bx = f(other);

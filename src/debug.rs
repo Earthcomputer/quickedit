@@ -40,7 +40,7 @@ macro_rules! profile_mutex {
 #[macro_export]
 macro_rules! profile_mutex {
     ($name:literal, $value:expr) => {
-        crate::debug::ProfileMutex::new($value)
+        $crate::debug::ProfileMutex::new($value)
     }
 }
 
@@ -150,7 +150,7 @@ impl<'a, T> Deref for ProfileMutexGuard<'a, T> {
     #[cfg(not(feature = "profile-with-tracy"))]
     #[inline]
     fn deref(&self) -> &T {
-        &*self.0
+        &self.0
     }
 }
 
@@ -164,6 +164,6 @@ impl<'a, T> DerefMut for ProfileMutexGuard<'a, T> {
     #[cfg(not(feature = "profile-with-tracy"))]
     #[inline]
     fn deref_mut(&mut self) -> &mut T {
-        &mut *self.0
+        &mut self.0
     }
 }

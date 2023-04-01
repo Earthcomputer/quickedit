@@ -40,7 +40,7 @@ impl fmt::Display for BlockState {
     }
 }
 
-#[allow(clippy::derive_hash_xor_eq)]
+#[allow(clippy::derived_hash_with_manual_eq)]
 impl Hash for BlockState {
     fn hash<H: std::hash::Hasher>(&self, state: &mut H) {
         self.block.hash(state);
@@ -99,24 +99,20 @@ pub struct Subchunk {
 }
 
 impl Subchunk {
-    #[profiling::function]
-    pub fn get_block_state(&self, pos: BlockPos) -> IBlockState {
+        pub fn get_block_state(&self, pos: BlockPos) -> IBlockState {
         self.block_data.read().unwrap().get(pos.x as usize, pos.y as usize, pos.z as usize).clone()
     }
 
-    #[profiling::function]
-    fn set_block_state(&self, pos: BlockPos, value: &IBlockState) {
+        fn set_block_state(&self, pos: BlockPos, value: &IBlockState) {
         self.block_data.write().unwrap().set(pos.x as usize, pos.y as usize, pos.z as usize, value);
         self.needs_redraw.store(true, Ordering::Release);
     }
 
-    #[profiling::function]
-    pub fn get_biome(&self, pos: BlockPos) -> FName {
+        pub fn get_biome(&self, pos: BlockPos) -> FName {
         self.biome_data.read().unwrap().get(pos.x as usize >> 2, pos.y as usize >> 2, pos.z as usize >> 2).clone()
     }
 
-    #[profiling::function]
-    fn set_biome(&self, pos: BlockPos, value: &FName) {
+        fn set_biome(&self, pos: BlockPos, value: &FName) {
         self.biome_data.write().unwrap().set(pos.x as usize >> 2, pos.y as usize >> 2, pos.z as usize >> 2, value);
         self.needs_redraw.store(true, Ordering::Release);
     }
@@ -133,8 +129,7 @@ impl Chunk {
         }
     }
 
-    #[profiling::function]
-    pub fn get_block_state(&self, dimension: &Dimension, pos: BlockPos) -> Option<IBlockState> {
+        pub fn get_block_state(&self, dimension: &Dimension, pos: BlockPos) -> Option<IBlockState> {
         let subchunk_index = (pos.y - dimension.min_y) >> 4;
         if subchunk_index < 0 {
             return None;
@@ -147,8 +142,7 @@ impl Chunk {
         Some(subchunk.get_block_state(pos & glam::IVec3::new(!0, 15, !0)))
     }
 
-    #[profiling::function]
-    pub fn get_biome(&self, dimension: &Dimension, pos: BlockPos) -> Option<FName> {
+        pub fn get_biome(&self, dimension: &Dimension, pos: BlockPos) -> Option<FName> {
         let subchunk_index = (pos.y - dimension.min_y) >> 4;
         if subchunk_index < 0 {
             return None;
@@ -184,14 +178,12 @@ impl Dimension {
         }
     }
 
-    #[profiling::function]
-    pub fn get_block_state(&self, pos: BlockPos) -> Option<IBlockState> {
+        pub fn get_block_state(&self, pos: BlockPos) -> Option<IBlockState> {
         let chunk = self.get_chunk(pos.xz() >> glam::IVec2::new(4, 4))?;
         chunk.get_block_state(self, pos & glam::IVec3::new(15, !0, 15))
     }
 
-    #[profiling::function]
-    pub fn get_biome(&self, pos: BlockPos) -> Option<FName> {
+        pub fn get_biome(&self, pos: BlockPos) -> Option<FName> {
         let chunk = self.get_chunk(pos.xz() >> glam::IVec2::new(4, 4))?;
         chunk.get_biome(self, pos & glam::IVec3::new(15, !0, 15))
     }
@@ -234,8 +226,7 @@ pub struct World {
 }
 
 impl World {
-    #[profiling::function]
-    pub fn load(path: PathBuf, interaction_handler: &mut dyn minecraft::DownloadInteractionHandler) -> io::Result<WorldRef> {
+        pub fn load(path: PathBuf, interaction_handler: &mut dyn minecraft::DownloadInteractionHandler) -> io::Result<WorldRef> {
         let resources_zip = path.join("resources.zip");
         let mut resource_packs = Vec::new();
         if resources_zip.exists() && resources_zip.is_file() {
@@ -277,8 +268,7 @@ impl World {
         Ok(world)
     }
 
-    #[profiling::function]
-    pub fn get_dimension(&self, id: &FName) -> Option<Arc<Dimension>> {
+        pub fn get_dimension(&self, id: &FName) -> Option<Arc<Dimension>> {
         self.dimensions.get(id).map(|d| d.clone())
     }
 }

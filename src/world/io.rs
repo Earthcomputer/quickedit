@@ -35,13 +35,11 @@ impl Dimension {
         }
     }
 
-    #[profiling::function]
-    pub fn get_chunk(&self, pos: ChunkPos) -> Option<Arc<Chunk>> {
+        pub fn get_chunk(&self, pos: ChunkPos) -> Option<Arc<Chunk>> {
         self.chunks.get(&pos).map(|chunk| chunk.clone())
     }
 
-    #[profiling::function]
-    pub fn load_chunk(&self, world: &World, pos: ChunkPos) -> Option<Arc<Chunk>> {
+        pub fn load_chunk(&self, world: &World, pos: ChunkPos) -> Option<Arc<Chunk>> {
         if self.chunk_existence_cache.get(&pos).map(|b| *b) == Some(false) {
             return None;
         }
@@ -71,18 +69,15 @@ impl Dimension {
         }).ok()
     }
 
-    #[profiling::function]
-    pub fn unload_chunk(&self, _world: &World, pos: ChunkPos) -> bool {
+        pub fn unload_chunk(&self, _world: &World, pos: ChunkPos) -> bool {
         self.chunks.remove(&pos).is_some()
     }
 
-    #[profiling::function]
-    pub fn try_does_chunk_exist(&self, world: &World, pos: ChunkPos) -> Option<bool> {
+        pub fn try_does_chunk_exist(&self, world: &World, pos: ChunkPos) -> Option<bool> {
         self.does_chunk_exist_internal(world, pos, false)
     }
 
-    #[profiling::function]
-    pub fn does_chunk_exist(&self, world: &World, pos: ChunkPos) -> bool {
+        pub fn does_chunk_exist(&self, world: &World, pos: ChunkPos) -> bool {
         self.does_chunk_exist_internal(world, pos, true).unwrap()
     }
 
@@ -125,8 +120,7 @@ impl Dimension {
         }).ok().map(|b| *b)
     }
 
-    #[profiling::function]
-    fn get_region_file(&self, world: &World, region_pos: IVec2, now: bool) -> io::Result<Option<FastDashRefMut<IVec2, (RandomAccessFile, time::SystemTime)>>> {
+        fn get_region_file(&self, world: &World, region_pos: IVec2, now: bool) -> io::Result<Option<FastDashRefMut<IVec2, (RandomAccessFile, time::SystemTime)>>> {
         if now {
             if let Entry::Occupied(entry) = self.region_file_cache.entry(region_pos) {
                 return Ok(Some(entry.into_ref()));
@@ -154,7 +148,7 @@ impl Dimension {
         Ok(Some(region_file_cache_entry))
     }
 
-    #[profiling::function]
+    #[allow(clippy::let_and_return)] // for some reason it doesn't compile without this
     fn read_chunk(&self, world: &World, pos: ChunkPos) -> io::Result<Option<Chunk>> {
         let serialized_chunk: SerializedChunk = {
             let region_file_cache_entry = match self.get_region_file(world, pos >> 5i8, true) {

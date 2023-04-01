@@ -132,7 +132,6 @@ where
     }
 }
 
-#[profiling::function]
 pub fn download_jar(version: &str) -> Result<PathBuf, io::Error> {
     fs::create_dir_all(get_minecraft_cache())?;
 
@@ -162,7 +161,7 @@ pub fn download_jar(version: &str) -> Result<PathBuf, io::Error> {
         Err(..) => None
     };
 
-    if actual_sha1.contains(&version_json.downloads.client.sha1) {
+    if actual_sha1.as_ref() == Some(&version_json.downloads.client.sha1) {
         return Ok(jar_path);
     }
 
@@ -176,7 +175,6 @@ fn get_minecraft_cache() -> PathBuf {
     PathBuf::from("./.minecraft_cache")
 }
 
-#[profiling::function]
 pub fn get_existing_jar(version: &str) -> Option<PathBuf> {
     get_launcher_minecraft_jar(version).or_else(|| find_existing_downloaded_jar(version))
 }
@@ -233,7 +231,6 @@ fn prismarine_url(suffix: &str) -> String {
     format!("{}{}", PRISMARINE_URL_PREFIX, suffix)
 }
 
-#[profiling::function]
 fn get_prismarine_version_data(mc_version: &str) -> io::Result<PrismarineVersionData> {
     fs::create_dir_all(get_minecraft_cache())?;
 
@@ -258,7 +255,6 @@ fn get_prismarine_version_data(mc_version: &str) -> io::Result<PrismarineVersion
     Ok(data_paths.pc.get(mc_version.as_str()).unwrap().clone())
 }
 
-#[profiling::function]
 pub fn get_biome_data(mc_version: &str) -> io::Result<AHashMap<FName, BiomeData>> {
     let version_data = get_prismarine_version_data(mc_version)?;
     let biome_data_location = version_data.biomes.ok_or_else(|| io::Error::new(io::ErrorKind::Other, "No biome data"))?;
@@ -271,7 +267,6 @@ pub fn get_biome_data(mc_version: &str) -> io::Result<AHashMap<FName, BiomeData>
     Ok(biome_data_map)
 }
 
-#[profiling::function]
 pub fn get_tint_data(mc_version: &str) -> io::Result<TintData> {
     let version_data = get_prismarine_version_data(mc_version)?;
     let tint_data_location = version_data.tints.ok_or_else(|| io::Error::new(io::ErrorKind::Other, "No tint data"))?;
@@ -567,7 +562,7 @@ pub fn get_minecraft_version(world_version: u32) -> Option<String> {
         false,
     ).ok()?;
     // try the most likely options first
-    if get_world_version(&version_manifest.latest.release).ok().contains(&world_version) {
+    if get_world_version(&version_manifest.latest.release).ok() == Some(world_version) {
         return Some(version_manifest.latest.release);
     }
     let snapshot_world_version = get_world_version(&version_manifest.latest.snapshot).ok();
@@ -575,7 +570,7 @@ pub fn get_minecraft_version(world_version: u32) -> Option<String> {
         return Some(version_manifest.latest.snapshot);
     }
 
-    let release_date_1_11_1 = chrono::Utc.ymd(2016, 12, 20).and_hms(23, 59, 59);
+    let release_date_1_11_1 = chrono::Utc.with_ymd_and_hms(2016, 12, 20, 23, 59, 59).unwrap();
 
     let mut versions: Vec<_> = version_manifest.versions.iter().filter(|v| v.release_time > release_date_1_11_1).collect();
     versions.sort_by_key(|v| v.release_time);

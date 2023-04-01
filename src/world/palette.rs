@@ -16,7 +16,7 @@ macro_rules! define_paletted_data {
 
         impl $name {
             pub(super) fn new() -> Self {
-                let bits_per_block = $default_palette_size.log2() as u8;
+                let bits_per_block = $default_palette_size.ilog2() as u8;
                 let entries_per_long = 64_u8 / bits_per_block;
                 $name {
                     bits_per_block,
@@ -34,7 +34,7 @@ macro_rules! define_paletted_data {
                     let bits_per_block = if palette.len() <= 1 {
                         1
                     } else {
-                        (((palette.len() - 1).log2() + 1) as u8).max($default_palette_size.log2() as u8)
+                        (((palette.len() - 1).ilog2() + 1) as u8).max($default_palette_size.ilog2() as u8)
                     };
                     let entries_per_long = 64_u8 / bits_per_block;
                     (bits_per_block, entries_per_long)
@@ -79,10 +79,9 @@ macro_rules! define_paletted_data {
                 self.data[bit] |= (val as u64) << (inbit * self.bits_per_block as usize);
             }
 
-            #[profiling::function]
-            fn resize(&mut self) {
+                        fn resize(&mut self) {
                 if self.data.is_empty() {
-                    self.bits_per_block = $default_palette_size.log2() as u8;
+                    self.bits_per_block = $default_palette_size.ilog2() as u8;
                     self.entries_per_long = 64_u8 / self.bits_per_block;
                     self.data = vec![0; ((1_usize << $h_bits) * (1_usize << $h_bits) * (1_usize << $v_bits)).div_ceil(self.entries_per_long as usize)];
                     return;
